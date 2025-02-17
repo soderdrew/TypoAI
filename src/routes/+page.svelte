@@ -43,6 +43,99 @@
 	/** raw text that the user enters into the `textarea` element */
 	let content = "";
 
+	/** Store previous content states for undo functionality */
+	interface ContentState {
+		content: string;
+		selectionStart: number;
+		selectionEnd: number;
+		isFormatting: boolean;
+	}
+	
+	let contentHistory: ContentState[] = [];
+	let historyIndex = -1;
+
+	/** Store content state before formatting */
+	const saveContentState = (isFormatting = false) => {
+		// Remove future states if we're in the middle of the history
+		if (historyIndex >= 0 && historyIndex < contentHistory.length - 1) {
+			contentHistory = contentHistory.slice(0, historyIndex + 1);
+		}
+		contentHistory.push({
+			content,
+			selectionStart: textArea.selectionStart,
+			selectionEnd: textArea.selectionEnd,
+			isFormatting
+		});
+		historyIndex = contentHistory.length - 1;
+	};
+
+	/** Restore previous content state */
+	const undo = () => {
+		if (historyIndex > 0) {
+			const currentState = contentHistory[historyIndex];
+			const previousState = contentHistory[historyIndex - 1];
+
+			if (!currentState || !previousState) return;
+
+			if (currentState.isFormatting) {
+				// For formatting operations, only restore the affected text range
+				const beforeText = content.substring(0, previousState.selectionStart);
+				const afterText = content.substring(previousState.selectionEnd);
+				const restoredText = previousState.content.substring(
+					previousState.selectionStart,
+					previousState.selectionEnd
+				);
+				content = beforeText + restoredText + afterText;
+				
+				// Restore cursor position
+				textArea.value = content;
+				textArea.setSelectionRange(
+					previousState.selectionStart,
+					previousState.selectionEnd
+				);
+			} else {
+				// For regular edits, restore the entire content
+				content = previousState.content;
+				textArea.value = content;
+				textArea.setSelectionRange(
+					previousState.selectionStart,
+					previousState.selectionEnd
+				);
+			}
+			historyIndex--;
+		}
+	};
+
+	/** Redo content state */
+	const redo = () => {
+		if (historyIndex < contentHistory.length - 1) {
+			const nextState = contentHistory[historyIndex + 1];
+			
+			if (!nextState) return;
+			
+			if (nextState.isFormatting) {
+				// For formatting operations, only restore the affected text range
+				const beforeText = content.substring(0, nextState.selectionStart);
+				const afterText = content.substring(nextState.selectionEnd);
+				const restoredText = nextState.content.substring(
+					nextState.selectionStart,
+					nextState.selectionEnd
+				);
+				content = beforeText + restoredText + afterText;
+			} else {
+				// For regular edits, restore the entire content
+				content = nextState.content;
+			}
+			
+			textArea.value = content;
+			textArea.setSelectionRange(
+				nextState.selectionStart,
+				nextState.selectionEnd
+			);
+			historyIndex++;
+		}
+	};
+
 	/** controls the expansion of the preview area */
 	let viewMode = false;
 
@@ -290,13 +383,110 @@
 	};
 
 	const onKeyDown = (e: KeyboardEvent) => {
-		if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-			e.preventDefault();
-			fmt();
-		}
-		if ((e.ctrlKey || e.metaKey) && e.key === "m") {
-			e.preventDefault();
-			toggleFocusMode();
+		// Format shortcuts
+		if (e.ctrlKey || e.metaKey) {
+			switch (e.key.toLowerCase()) {
+				case 'z':
+					e.preventDefault();
+					if (e.shiftKey) {
+						redo(); // Ctrl/Cmd + Shift + Z for Redo
+					} else {
+						undo(); // Ctrl/Cmd + Z for Undo
+					}
+					break;
+				case 's':
+					e.preventDefault();
+					saveContentState(); // Save state before saving file
+					if (e.shiftKey) {
+						saveAs(); // Ctrl/Cmd + Shift + S for Save As
+					} else {
+						save(); // Ctrl/Cmd + S for Save
+					}
+					break;
+				case 'b':
+					e.preventDefault();
+					saveContentState(true); // Save state before formatting
+					if (textArea.selectionStart === textArea.selectionEnd) {
+						// No selection - insert markdown and place cursor between
+						const pos = textArea.selectionStart;
+						textArea.setRangeText('****', pos, pos, 'end');
+						textArea.setSelectionRange(pos + 2, pos + 2);
+					} else {
+						// Check if text is already bold
+						const text = textArea.value.substring(textArea.selectionStart, textArea.selectionEnd);
+						if (text.startsWith('**') && text.endsWith('**')) {
+							// Remove bold formatting
+							const unformattedText = text.slice(2, -2);
+							textArea.setRangeText(unformattedText, textArea.selectionStart, textArea.selectionEnd, 'end');
+						} else {
+							// Add bold formatting
+							textArea.setRangeText(`**${text}**`, textArea.selectionStart, textArea.selectionEnd, 'end');
+						}
+					}
+					break;
+				case 'i':
+					e.preventDefault();
+					saveContentState(true); // Save state before formatting
+					if (textArea.selectionStart === textArea.selectionEnd) {
+						// No selection - insert markdown and place cursor between
+						const pos = textArea.selectionStart;
+						textArea.setRangeText('**', pos, pos, 'end');
+						textArea.setSelectionRange(pos + 1, pos + 1);
+					} else {
+						// Check if text is already italic
+						const text = textArea.value.substring(textArea.selectionStart, textArea.selectionEnd);
+						if (text.startsWith('*') && text.endsWith('*') && !text.startsWith('**')) {
+							// Remove italic formatting
+							const unformattedText = text.slice(1, -1);
+							textArea.setRangeText(unformattedText, textArea.selectionStart, textArea.selectionEnd, 'end');
+						} else {
+							// Add italic formatting
+							textArea.setRangeText(`*${text}*`, textArea.selectionStart, textArea.selectionEnd, 'end');
+						}
+					}
+					break;
+				case 'u':
+					e.preventDefault();
+					saveContentState(true); // Save state before formatting
+					if (textArea.selectionStart === textArea.selectionEnd) {
+						// No selection - insert markdown and place cursor between
+						const pos = textArea.selectionStart;
+						textArea.setRangeText('<ins></ins>', pos, pos, 'end');
+						textArea.setSelectionRange(pos + 5, pos + 5);
+					} else {
+						// Check if text is already underlined
+						const text = textArea.value.substring(textArea.selectionStart, textArea.selectionEnd);
+						if (text.startsWith('<ins>') && text.endsWith('</ins>')) {
+							// Remove underline formatting
+							const unformattedText = text.slice(5, -6);
+							textArea.setRangeText(unformattedText, textArea.selectionStart, textArea.selectionEnd, 'end');
+						} else {
+							// Add underline formatting
+							textArea.setRangeText(`<ins>${text}</ins>`, textArea.selectionStart, textArea.selectionEnd, 'end');
+						}
+					}
+					break;
+				case 'k':
+					e.preventDefault();
+					if (textArea.selectionStart === textArea.selectionEnd) {
+						// No selection - insert template and place cursor at 'text'
+						const pos = textArea.selectionStart;
+						textArea.setRangeText('[text](url)', pos, pos, 'end');
+						textArea.setSelectionRange(pos + 1, pos + 5); // Select 'text'
+					} else {
+						// Use selected text as link text
+						const text = textArea.value.substring(textArea.selectionStart, textArea.selectionEnd);
+						textArea.setRangeText(`[${text}](url)`, textArea.selectionStart, textArea.selectionEnd, 'end');
+						// Position cursor at 'url'
+						const endOfText = textArea.selectionEnd;
+						textArea.setSelectionRange(endOfText + 2, endOfText + 5);
+					}
+					break;
+				case 'm':
+					e.preventDefault();
+					toggleFocusMode();
+					break;
+			}
 		}
 	};
 
@@ -469,7 +659,7 @@
                     <button
                         data-trigger
                         class="button"
-                        title="Heading"
+                        title="Heading (# )"
                         data-value="# "
                         data-type="block"
                     >
@@ -478,7 +668,7 @@
                     <button
                         data-trigger
                         class="button"
-                        title="Bullet"
+                        title="Bullet (- )"
                         data-value="- "
                         data-type="block"
                     >
@@ -487,7 +677,7 @@
                     <button
                         data-trigger
                         class="button"
-                        title="Blockquote"
+                        title="Blockquote (> )"
                         data-value="> "
                         data-type="block"
                     >
@@ -496,7 +686,7 @@
                     <button
                         data-trigger
                         class="button italic"
-                        title="Italic"
+                        title="Italic (Ctrl/Cmd + I)"
                         data-value="*"
                         data-type="wrap"
                     >
@@ -505,7 +695,7 @@
                     <button
                         data-trigger
                         class="button"
-                        title="Bold"
+                        title="Bold (Ctrl/Cmd + B)"
                         data-value="**"
                         data-type="wrap"
                     >
@@ -513,8 +703,18 @@
                     </button>
                     <button
                         data-trigger
+                        class="button underline"
+                        title="Underline (Ctrl/Cmd + U)"
+                        data-value="<ins>"
+                        data-type="wrap"
+                        data-end-value="</ins>"
+                    >
+                        U
+                    </button>
+                    <button
+                        data-trigger
                         class="button font-normal line-through"
-                        title="Strikethrough"
+                        title="Strikethrough (~)"
                         data-value="~"
                         data-type="wrap"
                     >
@@ -523,7 +723,7 @@
                     <button
                         data-trigger
                         class="button"
-                        title="Anchor"
+                        title="Link (Ctrl/Cmd + K)"
                         data-value="[text](href)"
                         data-type="inline"
                         data-key="["
@@ -535,7 +735,7 @@
                     <button
                         data-trigger
                         class="button"
-                        title="Image"
+                        title="Image (![alt](src))"
                         data-value="![alt](src)"
                         data-type="inline"
                         data-key="]"
@@ -555,7 +755,7 @@
                     <button
                         data-trigger
                         class="button"
-                        title="Code"
+                        title="Code (`)"
                         data-value={"`"}
                         data-type="wrap"
                     >
@@ -564,7 +764,7 @@
                     <button
                         data-trigger
                         class="button"
-                        title="Slide"
+                        title="Slide (---)"
                         data-value="---"
                         data-type="inline"
                     >
