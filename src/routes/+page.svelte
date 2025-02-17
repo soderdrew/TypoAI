@@ -35,6 +35,7 @@
 	import Copy from "$lib/components/svg/Copy.svelte";
 	import CopyComplete from "$lib/components/svg/CopyComplete.svelte";
 	import CodeBracket from "$lib/components/svg/CodeBracket.svelte";
+	import Focus from "$lib/components/svg/Focus.svelte";
 
 	inject({ mode: dev ? "development" : "production" });
 
@@ -84,6 +85,7 @@
 		fontFamily: number;
 		color: number;
 		viewType: (typeof viewTypes)[number];
+		focusMode: boolean;
 	}
 
 	let preferences: Preferences = {
@@ -91,6 +93,7 @@
 		fontFamily: 0,
 		color: 0,
 		viewType: "document",
+		focusMode: false
 	};
 
 	const savePreferences = () => {
@@ -155,10 +158,7 @@
 		const toggleView = () => {
 			viewMode = !viewMode;
 		};
-
-		// @ts-expect-error - not supported by all browsers
 		if (document.startViewTransition) {
-			// @ts-expect-error - not supported by all browsers
 			document.startViewTransition(() => {
 				toggleView();
 			});
@@ -199,6 +199,11 @@
 		savePreferences();
 	};
 
+	const toggleFocusMode = () => {
+		preferences.focusMode = !preferences.focusMode;
+		savePreferences();
+	};
+
 	const onKeyUp = (e: KeyboardEvent) => {
 		save();
 		if (e.key === "i") {
@@ -222,6 +227,10 @@
 		if ((e.ctrlKey || e.metaKey) && e.key === "s") {
 			e.preventDefault();
 			fmt();
+		}
+		if ((e.ctrlKey || e.metaKey) && e.key === "m") {
+			e.preventDefault();
+			toggleFocusMode();
 		}
 	};
 
@@ -261,354 +270,358 @@
 	}
 </script>
 
-<svelte:document on:keyup={onKeyUp} on:keydown={onKeyDown} />
+<svelte:document />
 
-<div
-	class="flex h-[100dvh] flex-col bg-gray-950 text-gray-50 selection:bg-gray-400 selection:bg-opacity-40"
-	on:drop={dropFile}
-	role="main"
+<main 
+    class="h-screen flex flex-col bg-gray-950 text-gray-50"
+    role="application"
+    aria-label="Markdown Editor"
+    on:keydown={onKeyDown} 
+    on:keyup={onKeyUp}
+    on:drop={dropFile}
+    on:dragover|preventDefault
+    tabindex="0"
 >
-	{#if !viewMode}
-		<header class="flex justify-between p-3 text-sm">
-			<nav class="flex w-full items-center justify-between sm:w-fit">
-				<div class="flex">
-					{#if supported}
-						<button
-							title="Open (or drag and drop)"
-							class="button"
-							on:click={open}
-						>
-							<Open />
-							<span class="hidden lg:inline">Open</span>
-						</button>
-						<button title="Save As" class="button" on:click={saveAs}>
-							<Save />
-							<span class="hidden lg:inline">Save As</span>
-						</button>
-					{:else}
-						<a
-							href="data:text/plain,{content}"
-							download="Untitled.md"
-							title="Download"
-							class="button"
-						>
-							<Save />
-							<span class="hidden lg:inline">Download</span>
-						</a>
-					{/if}
-					<drab-copy value={content} class="contents">
-						<button data-trigger class="button">
-							<span data-content>
-								<Copy />
-							</span>
-							<template data-swap>
-								<CopyComplete />
-							</template>
-							<span class="hidden lg:inline">Copy</span>
-						</button>
-					</drab-copy>
+    <!-- Top toolbar -->
+    <header class="transition-all duration-300 border-b border-gray-700" class:hidden={preferences.focusMode}>
+        {#if !viewMode}
+            <div class="flex justify-between p-3 text-sm">
+                <nav class="flex w-full items-center justify-between sm:w-fit">
+                    <div class="flex">
+                        {#if supported}
+                            <button
+                                title="Open (or drag and drop)"
+                                class="button"
+                                on:click={open}
+                            >
+                                <Open />
+                                <span class="hidden lg:inline">Open</span>
+                            </button>
+                            <button title="Save As" class="button" on:click={saveAs}>
+                                <Save />
+                                <span class="hidden lg:inline">Save As</span>
+                            </button>
+                        {:else}
+                            <a
+                                href="data:text/plain,{content}"
+                                download="Untitled.md"
+                                title="Download"
+                                class="button"
+                            >
+                                <Save />
+                                <span class="hidden lg:inline">Download</span>
+                            </a>
+                        {/if}
+                        <drab-copy value={content} class="contents">
+                            <button data-trigger class="button">
+                                <span data-content>
+                                    <Copy />
+                                </span>
+                                <template data-swap>
+                                    <CopyComplete />
+                                </template>
+                                <span class="hidden lg:inline">Copy</span>
+                            </button>
+                        </drab-copy>
 
-					<drab-copy value={html} class="contents">
-						<button data-trigger title="Copy HTML" class="button">
-							<span data-content>
-								<Code />
-							</span>
-							<template data-swap>
-								<CopyComplete />
-							</template>
-							<span class="hidden lg:inline">Copy</span>
-						</button>
-					</drab-copy>
-					<PrintButton innerHtml={html} />
-					<button title="Format" on:click={fmt} class="button">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 24 24"
-							fill="currentColor"
-							class="h-5 w-5"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0016.5 9h-1.875a1.875 1.875 0 01-1.875-1.875V5.25A3.75 3.75 0 009 1.5H5.625zM7.5 15a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5A.75.75 0 017.5 15zm.75 2.25a.75.75 0 000 1.5H12a.75.75 0 000-1.5H8.25z"
-								clip-rule="evenodd"
-							/>
-							<path
-								d="M12.971 1.816A5.23 5.23 0 0114.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 013.434 1.279 9.768 9.768 0 00-6.963-6.963z"
-							/>
-						</svg>
-						<span class="hidden lg:inline">Format</span>
-					</button>
-					<button title="View" class="button lg:hidden" on:click={toggleView}>
-						<View />
-					</button>
-				</div>
-			</nav>
-			<div class="hidden px-4 py-2 font-bold sm:block">
-				{file?.name ? file.name : "Typo"}
-			</div>
-		</header>
-	{/if}
-	<main class="grid grow overflow-hidden {viewMode ? '' : 'lg:grid-cols-2'}">
-		{#if !viewMode}
-			<div class="flex h-full flex-col">
-				<drab-editor class="contents">
-					<textarea
-						bind:this={textArea}
-						data-content
-						class="grow resize-none appearance-none overflow-y-auto p-6 font-mono text-sm transition placeholder:text-gray-400 focus:outline-none {colors
-							.dark[preferences.color]}"
-						placeholder="# Title"
-						bind:value={content}
-					></textarea>
-					<div class="flex flex-wrap p-3">
-						<button
-							data-trigger
-							class="button"
-							title="Heading"
-							data-value="# "
-							data-type="block"
-						>
-							H
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Bullet"
-							data-value="- "
-							data-type="block"
-						>
-							<Bullet />
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Blockquote"
-							data-value="> "
-							data-type="block"
-						>
-							<Blockquote />
-						</button>
-						<button
-							data-trigger
-							class="button italic"
-							title="Italic"
-							data-value="*"
-							data-type="wrap"
-						>
-							I
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Bold"
-							data-value="**"
-							data-type="wrap"
-						>
-							B
-						</button>
-						<button
-							data-trigger
-							class="button font-normal line-through"
-							title="Strikethrough"
-							data-value="~"
-							data-type="wrap"
-						>
-							S
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Anchor"
-							data-value="[text](href)"
-							data-type="inline"
-							data-key="["
-						>
-							<span>
-								<Anchor />
-							</span>
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Image"
-							data-value="![alt](src)"
-							data-type="inline"
-							data-key="]"
-						>
-							<Image />
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Table"
-							data-value={"| th  | th  |\n| --- | --- |\n| td  | td  |\n| td  | td  |"}
-							data-type="inline"
-							data-key={"\\"}
-						>
-							<Table />
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Code"
-							data-value={"`"}
-							data-type="wrap"
-						>
-							<CodeBracket />
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Slide"
-							data-value="---"
-							data-type="inline"
-						>
-							<Slideshow />
-						</button>
-					</div>
-				</drab-editor>
-			</div>
-		{/if}
-		<div
-			style="view-transition-name: preview;"
-			class="flex-col lg:flex {viewMode ? 'flex' : 'hidden'}"
-		>
-			<div
-				class="grow overflow-y-auto border-gray-100 bg-white dark:border-y dark:border-gray-900 dark:bg-gray-950 {viewMode
-					? 'max-h-[calc(100dvh-3.75rem)]'
-					: 'max-h-[calc(100dvh-7.5rem)]'}"
-				class:border-y={preferences.viewType === "document" && viewMode}
-				class:dark:border-none={preferences.viewType === "slideshow" &&
-					viewMode}
-			>
-				<!-- content -->
-				<div
-					class="prose prose-gray mx-auto h-full max-w-[72ch] break-words transition-[font-size] dark:prose-invert prose-img:rounded-lg {fontSizes[
-						preferences.fontSize
-					]} {colors.prose[preferences.color]} {fontFamilies[
-						preferences.fontFamily
-					]}"
-				>
-					{#if preferences.viewType === "document"}
-						<div class="p-8">
-							{@html html}
-						</div>
-					{:else if preferences.viewType === "slideshow"}
-						<Slides bind:viewMode bind:currentSlide {html} />
-					{/if}
-				</div>
-			</div>
-			<div
-				class="group flex justify-between p-3"
-				class:bg-white={viewMode}
-				class:text-gray-950={viewMode}
-				class:dark:bg-gray-950={viewMode}
-				class:dark:text-gray-50={viewMode}
-			>
-				<!-- viewType controls -->
-				<div class="flex">
-					{#each viewTypes as type}
-						<button
-							class="button group-hover:opacity-100"
-							class:opacity-0={viewMode}
-							disabled={preferences.viewType === type}
-							on:click={() => changeViewType(type)}
-							title={type}
-						>
-							{#if type === "document"}
-								<Document />
-							{:else if type === "slideshow"}
-								<Slideshow />
-							{/if}
-						</button>
-					{/each}
-					<div
-						class="transition group-hover:opacity-100"
-						class:opacity-0={viewMode}
-					>
-						<Metrics {content} />
-					</div>
-				</div>
-				<div class="flex">
-					<button
-						title="Change Color"
-						class="button group-hover:opacity-100"
-						class:opacity-0={viewMode}
-						on:click={changeColor}
-					>
-						<div
-							class="h-5 w-5 rounded-full border-2 border-gray-50 {colors
-								.medium[preferences.color]}"
-							class:border-gray-950={viewMode}
-							class:dark:border-gray-50={viewMode}
-						/>
-					</button>
-					<button
-						title="Change Font"
-						class="button group-hover:opacity-100 {fontFamilies[
-							preferences.fontFamily
-						]}"
-						class:opacity-0={viewMode}
-						on:click={changeFontFamily}
-						aria-label={preferences.fontFamily ? "sans-serif" : "serif"}
-					>
-						F
-					</button>
-					<button
-						title="Decrease Font Size"
-						class="button group-hover:opacity-100"
-						class:opacity-0={viewMode}
-						disabled={preferences.fontSize < 1}
-						on:click={() => changeProseSize("decrease")}
-					>
-						<ZoomOut />
-					</button>
-					<button
-						title="Increase Font Size"
-						class="button group-hover:opacity-100"
-						class:opacity-0={viewMode}
-						disabled={preferences.fontSize >= fontSizes.length - 1}
-						on:click={() => changeProseSize("increase")}
-					>
-						<ZoomIn />
-					</button>
+                        <drab-copy value={html} class="contents">
+                            <button data-trigger title="Copy HTML" class="button">
+                                <span data-content>
+                                    <Code />
+                                </span>
+                                <template data-swap>
+                                    <CopyComplete />
+                                </template>
+                                <span class="hidden lg:inline">Copy</span>
+                            </button>
+                        </drab-copy>
+                        <PrintButton innerHtml={html} />
+                        <button title="Format" on:click={fmt} class="button">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                                class="h-5 w-5"
+                            >
+                                <path
+                                    fill-rule="evenodd"
+                                    d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0016.5 9h-1.875a1.875 1.875 0 01-1.875-1.875V5.25A3.75 3.75 0 009 1.5H5.625zM7.5 15a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5A.75.75 0 017.5 15zm.75 2.25a.75.75 0 000 1.5H12a.75.75 0 000-1.5H8.25z"
+                                    clip-rule="evenodd"
+                                />
+                                <path
+                                    d="M12.971 1.816A5.23 5.23 0 0114.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 013.434 1.279 9.768 9.768 0 00-6.963-6.963z"
+                                />
+                            </svg>
+                            <span class="hidden lg:inline">Format</span>
+                        </button>
+                        <button title="View" class="button lg:hidden" on:click={toggleView}>
+                            <View />
+                        </button>
+                    </div>
+                </nav>
+                <div class="hidden px-4 py-2 font-bold sm:block">
+                    {file?.name ? file.name : "TypoAI"}
+                </div>
+            </div>
+        {/if}
+    </header>
 
-					<drab-fullscreen class="contents">
-						<button
-							data-trigger
-							title="Toggle Fullscreen"
-							class="button group-hover:opacity-100"
-							class:opacity-0={viewMode}
-						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 24 24"
-								fill="currentColor"
-								class="h-5 w-5"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M15 3.75a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0V5.56l-3.97 3.97a.75.75 0 1 1-1.06-1.06l3.97-3.97h-2.69a.75.75 0 0 1-.75-.75Zm-12 0A.75.75 0 0 1 3.75 3h4.5a.75.75 0 0 1 0 1.5H5.56l3.97 3.97a.75.75 0 0 1-1.06 1.06L4.5 5.56v2.69a.75.75 0 0 1-1.5 0v-4.5Zm11.47 11.78a.75.75 0 1 1 1.06-1.06l3.97 3.97v-2.69a.75.75 0 0 1 1.5 0v4.5a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1 0-1.5h2.69l-3.97-3.97Zm-4.94-1.06a.75.75 0 0 1 0 1.06L5.56 19.5h2.69a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1-.75-.75v-4.5a.75.75 0 0 1 1.5 0v2.69l3.97-3.97a.75.75 0 0 1 1.06 0Z"
-									clip-rule="evenodd"
-								/>
-							</svg>
-						</button>
-					</drab-fullscreen>
+    <!-- Main content area -->
+    <main class="flex-1 flex overflow-hidden">
+        <!-- Editor pane -->
+        <div
+            class="w-1/2 flex flex-col h-full"
+            class:hidden={viewMode}
+        >
+            <drab-editor class="h-full flex flex-col">
+                <textarea
+                    bind:this={textArea}
+                    data-content
+                    class="flex-1 resize-none appearance-none overflow-y-auto p-6 font-mono text-sm transition placeholder:text-gray-400 focus:outline-none {colors.dark[preferences.color]}"
+                    placeholder="# Title"
+                    bind:value={content}
+                ></textarea>
+                <div class="flex flex-wrap p-3 border-t border-gray-700 transition-all duration-300" class:hidden={preferences.focusMode}>
+                    <button
+                        data-trigger
+                        class="button"
+                        title="Heading"
+                        data-value="# "
+                        data-type="block"
+                    >
+                        H
+                    </button>
+                    <button
+                        data-trigger
+                        class="button"
+                        title="Bullet"
+                        data-value="- "
+                        data-type="block"
+                    >
+                        <Bullet />
+                    </button>
+                    <button
+                        data-trigger
+                        class="button"
+                        title="Blockquote"
+                        data-value="> "
+                        data-type="block"
+                    >
+                        <Blockquote />
+                    </button>
+                    <button
+                        data-trigger
+                        class="button italic"
+                        title="Italic"
+                        data-value="*"
+                        data-type="wrap"
+                    >
+                        I
+                    </button>
+                    <button
+                        data-trigger
+                        class="button"
+                        title="Bold"
+                        data-value="**"
+                        data-type="wrap"
+                    >
+                        B
+                    </button>
+                    <button
+                        data-trigger
+                        class="button font-normal line-through"
+                        title="Strikethrough"
+                        data-value="~"
+                        data-type="wrap"
+                    >
+                        S
+                    </button>
+                    <button
+                        data-trigger
+                        class="button"
+                        title="Anchor"
+                        data-value="[text](href)"
+                        data-type="inline"
+                        data-key="["
+                    >
+                        <span>
+                            <Anchor />
+                        </span>
+                    </button>
+                    <button
+                        data-trigger
+                        class="button"
+                        title="Image"
+                        data-value="![alt](src)"
+                        data-type="inline"
+                        data-key="]"
+                    >
+                        <Image />
+                    </button>
+                    <button
+                        data-trigger
+                        class="button"
+                        title="Table"
+                        data-value={"| th  | th  |\n| --- | --- |\n| td  | td  |\n| td  | td  |"}
+                        data-type="inline"
+                        data-key={"\\"}
+                    >
+                        <Table />
+                    </button>
+                    <button
+                        data-trigger
+                        class="button"
+                        title="Code"
+                        data-value={"`"}
+                        data-type="wrap"
+                    >
+                        <CodeBracket />
+                    </button>
+                    <button
+                        data-trigger
+                        class="button"
+                        title="Slide"
+                        data-value="---"
+                        data-type="inline"
+                    >
+                        <Slideshow />
+                    </button>
+                    <button
+                        class="button"
+                        title="Toggle Focus Mode (Ctrl/Cmd + M)"
+                        on:click={toggleFocusMode}
+                    >
+                        <Focus />
+                    </button>
+                </div>
+            </drab-editor>
+        </div>
 
-					<!-- viewMode toggle -->
-					<button
-						title={viewMode ? "Edit" : "View"}
-						class="button"
-						on:click={toggleView}
-					>
-						{#if viewMode}
-							<Edit />
-						{:else}
-							<View />
-						{/if}
-					</button>
-				</div>
-			</div>
-		</div>
-	</main>
-</div>
+        <!-- Preview pane -->
+        <div
+            style="view-transition-name: preview;"
+            class="w-1/2 flex flex-col {viewMode ? 'w-full' : ''}"
+        >
+            <div class="flex-1 overflow-y-auto bg-white dark:bg-gray-950">
+                <div
+                    class="prose prose-gray mx-auto h-full max-w-[72ch] break-words p-8 transition-[font-size] dark:prose-invert prose-img:rounded-lg {fontSizes[preferences.fontSize]} {colors.prose[preferences.color]} {fontFamilies[preferences.fontFamily]}"
+                >
+                    {#if preferences.viewType === "document"}
+                        {@html html}
+                    {:else if preferences.viewType === "slideshow"}
+                        <Slides bind:viewMode bind:currentSlide {html} />
+                    {/if}
+                </div>
+            </div>
+            <!-- Preview controls -->
+            <div
+                class="flex justify-between p-3 border-t border-gray-700"
+                class:bg-white={viewMode}
+                class:text-gray-950={viewMode}
+                class:dark:bg-gray-950={viewMode}
+                class:dark:text-gray-50={viewMode}
+            >
+                <!-- viewType controls -->
+                <div class="flex">
+                    {#each viewTypes as type}
+                        <button
+                            class="button group-hover:opacity-100"
+                            class:opacity-0={viewMode}
+                            disabled={preferences.viewType === type}
+                            on:click={() => changeViewType(type)}
+                            title={type}
+                        >
+                            {#if type === "document"}
+                                <Document />
+                            {:else if type === "slideshow"}
+                                <Slideshow />
+                            {/if}
+                        </button>
+                    {/each}
+                    <div
+                        class="transition group-hover:opacity-100"
+                        class:opacity-0={viewMode}
+                    >
+                        <Metrics {content} />
+                    </div>
+                </div>
+                <div class="flex">
+                    <button
+                        title="Change Color"
+                        class="button group-hover:opacity-100"
+                        class:opacity-0={viewMode}
+                        on:click={changeColor}
+                    >
+                        <div
+                            class="h-5 w-5 rounded-full border-2 border-gray-50 {colors.medium[preferences.color]}"
+                            class:border-gray-950={viewMode}
+                            class:dark:border-gray-50={viewMode}
+                        />
+                    </button>
+                    <button
+                        title="Change Font"
+                        class="button group-hover:opacity-100 {fontFamilies[preferences.fontFamily]}"
+                        class:opacity-0={viewMode}
+                        on:click={changeFontFamily}
+                        aria-label={preferences.fontFamily ? "sans-serif" : "serif"}
+                    >
+                        F
+                    </button>
+                    <button
+                        title="Decrease Font Size"
+                        class="button group-hover:opacity-100"
+                        class:opacity-0={viewMode}
+                        disabled={preferences.fontSize < 1}
+                        on:click={() => changeProseSize("decrease")}
+                    >
+                        <ZoomOut />
+                    </button>
+                    <button
+                        title="Increase Font Size"
+                        class="button group-hover:opacity-100"
+                        class:opacity-0={viewMode}
+                        disabled={preferences.fontSize >= fontSizes.length - 1}
+                        on:click={() => changeProseSize("increase")}
+                    >
+                        <ZoomIn />
+                    </button>
+
+                    <drab-fullscreen class="contents">
+                        <button
+                            data-trigger
+                            title="Toggle Fullscreen"
+                            class="button group-hover:opacity-100"
+                            class:opacity-0={viewMode}
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                                class="h-5 w-5"
+                            >
+                                <path
+                                    fill-rule="evenodd"
+                                    d="M15 3.75a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0V5.56l-3.97 3.97a.75.75 0 1 1-1.06-1.06l3.97-3.97h-2.69a.75.75 0 0 1-.75-.75Zm-12 0A.75.75 0 0 1 3.75 3h4.5a.75.75 0 0 1 0 1.5H5.56l3.97 3.97a.75.75 0 0 1-1.06 1.06L4.5 5.56v2.69a.75.75 0 0 1-1.5 0v-4.5Zm11.47 11.78a.75.75 0 1 1 1.06-1.06l3.97 3.97v-2.69a.75.75 0 0 1 1.5 0v4.5a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1 0-1.5h2.69l-3.97-3.97Zm-4.94-1.06a.75.75 0 0 1 0 1.06L5.56 19.5h2.69a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1-.75-.75v-4.5a.75.75 0 0 1 1.5 0v2.69l3.97-3.97a.75.75 0 0 1 1.06 0Z"
+                                    clip-rule="evenodd"
+                                />
+                            </svg>
+                        </button>
+                    </drab-fullscreen>
+
+                    <!-- viewMode toggle -->
+                    <button
+                        title={viewMode ? "Edit" : "View"}
+                        class="button"
+                        on:click={toggleView}
+                    >
+                        {#if viewMode}
+                            <Edit />
+                        {:else}
+                            <View />
+                        {/if}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+</main>
