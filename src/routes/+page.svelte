@@ -3,6 +3,7 @@
 
 	import { dev, browser } from "$app/environment";
 	import { afterUpdate, onMount, tick } from "svelte";
+	import { convertDocumentToMarkdown } from '$lib/utilities/convertDocument';
 
 	import { processMarkdown } from "robino/util/md";
 
@@ -51,6 +52,7 @@
 
 	let file: File | null;
 	let fileHandle: FileSystemFileHandle | null;
+	let errorMessage: string | null = null;
 
 	/** `true` if the browser supports the `window.showOpenFilePicker` method */
 	let supported = false;
@@ -103,9 +105,12 @@
 	const options: FilePickerOptions = {
 		types: [
 			{
-				description: "markdown",
+				description: "markdown and documents",
 				accept: {
 					"text/markdown": [".md", ".mdx", ".mdoc", ".markdoc", ".svx"],
+					"application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+					"application/pdf": [".pdf"],
+					"text/plain": [".txt"]
 				},
 			},
 		],
@@ -113,10 +118,23 @@
 	};
 
 	const open = async () => {
-		[fileHandle] = await window.showOpenFilePicker(options);
-		file = await fileHandle.getFile();
-		content = await file.text();
-		toggleView();
+		try {
+			[fileHandle] = await window.showOpenFilePicker(options);
+			file = await fileHandle.getFile();
+			
+			// Handle document conversion for supported file types
+			if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || 
+				file.type === "text/plain" ||
+				file.type === "application/pdf") {
+				content = await convertDocumentToMarkdown(file);
+			} else {
+				content = await file.text();
+			}
+			errorMessage = null;
+		} catch (error) {
+			console.error("Error during file open/conversion:", error);
+			errorMessage = `Error converting file: ${error}`;
+		}
 	};
 
 	const saveAs = async () => {
@@ -144,11 +162,25 @@
 				// @ts-ignore - not supported by all browsers
 				if (item.getAsFileSystemHandle) {
 					e.preventDefault();
-					const handle = await item.getAsFileSystemHandle();
-					// since `item.kind === "file"` it will be a `FileSystemFileHandle`
-					fileHandle = handle as FileSystemFileHandle;
-					file = await fileHandle.getFile();
-					content = await file.text();
+					try {
+						const handle = await item.getAsFileSystemHandle();
+						// since `item.kind === "file"` it will be a `FileSystemFileHandle`
+						fileHandle = handle as FileSystemFileHandle;
+						file = await fileHandle.getFile();
+						
+						// Handle document conversion for supported file types
+						if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || 
+							file.type === "text/plain" ||
+							file.type === "application/pdf") {
+							content = await convertDocumentToMarkdown(file);
+						} else {
+							content = await file.text();
+						}
+						errorMessage = null;
+					} catch (error) {
+						console.error("Error during file drop/conversion:", error);
+						errorMessage = `Error converting file: ${error}`;
+					}
 				}
 			}
 		}
@@ -241,6 +273,10 @@
 			if (s.startsWith("---\n")) curr++; // if first line === `---`, considered an <hr>
 			currentSlide = curr;
 		}
+	};
+
+	const clearError = () => {
+		errorMessage = null;
 	};
 
 	onMount(async () => {
@@ -363,6 +399,20 @@
                     {file?.name ? file.name : "TypoAI"}
                 </div>
             </div>
+            {#if errorMessage}
+                <div class="bg-red-950 text-red-100 px-4 py-2 text-sm flex justify-between items-center">
+                    <span>{errorMessage}</span>
+                    <button 
+                        class="ml-4 text-red-100 hover:text-white focus:outline-none" 
+                        on:click={clearError}
+                        title="Dismiss"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            {/if}
         {/if}
     </header>
 
