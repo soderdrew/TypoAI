@@ -266,7 +266,12 @@
 	};
 
 	const onKeyUp = (e: KeyboardEvent) => {
-		save();
+		// Only save if Ctrl/Cmd + S is pressed
+		if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+			e.preventDefault();
+			save();
+		}
+		
 		if (e.key === "i") {
 			textArea.focus();
 		}
