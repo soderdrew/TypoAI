@@ -117,6 +117,18 @@
 		excludeAcceptAllOption: true,
 	};
 
+	const saveOptions: FilePickerOptions = {
+		types: [
+			{
+				description: "markdown",
+				accept: {
+					"text/markdown": [".md"]
+				},
+			},
+		],
+		excludeAcceptAllOption: true,
+	};
+
 	const open = async () => {
 		try {
 			[fileHandle] = await window.showOpenFilePicker(options);
@@ -127,6 +139,8 @@
 				file.type === "text/plain" ||
 				file.type === "application/pdf") {
 				content = await convertDocumentToMarkdown(file);
+				// Clear fileHandle since we're working with converted content
+				fileHandle = null;
 			} else {
 				content = await file.text();
 			}
@@ -138,19 +152,34 @@
 	};
 
 	const saveAs = async () => {
-		const handle = await window.showSaveFilePicker(options);
-		const writable = await handle.createWritable();
-		await writable.write(content);
-		await writable.close();
-		file = await handle.getFile();
-		fileHandle = handle;
+		try {
+			const handle = await window.showSaveFilePicker(saveOptions);
+			const writable = await handle.createWritable();
+			await writable.write(content);
+			await writable.close();
+			file = await handle.getFile();
+			fileHandle = handle;
+		} catch (error) {
+			console.error("Error saving file:", error);
+			errorMessage = `Error saving file: ${error}`;
+		}
 	};
 
 	const save = async () => {
 		if (fileHandle && !viewMode) {
-			const writable = await fileHandle.createWritable();
-			await writable.write(content);
-			await writable.close();
+			try {
+				const writable = await fileHandle.createWritable();
+				await writable.write(content);
+				await writable.close();
+			} catch (error) {
+				console.error("Error saving file:", error);
+				errorMessage = `Error saving file: ${error}`;
+				// If save fails, prompt for save as
+				await saveAs();
+			}
+		} else {
+			// If no fileHandle, do save as
+			await saveAs();
 		}
 	};
 
