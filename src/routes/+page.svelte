@@ -46,6 +46,7 @@
 	import Files from '$lib/components/svg/Files.svelte';
 	import { databaseService } from '$lib/services/database';
 	import type { SharedDocument } from '$lib/services/database';
+	import { initializeCollaboration } from '$lib/services/collaboration';
 
 	inject({ mode: dev ? "development" : "production" });
 
@@ -614,6 +615,72 @@
 		}
 	}
 
+	let currentCollaboration: { 
+		saveContent: (content: string) => Promise<void>;
+		updatePresence: (cursor: { start: number; end: number; } | null) => Promise<void>;
+		cleanup: () => void;
+		getContent: () => string;
+		getPresence: () => Record<string, any>;
+	} | null = null;
+
+	// Add presence state
+	let userPresence: Record<string, any> = {};
+
+	const loadFile = async (file: AppwriteDocument) => {
+		try {
+			// Cleanup previous collaboration
+			if (currentCollaboration) {
+				currentCollaboration.cleanup();
+			}
+
+			// Save current file if there are unsaved changes
+			if (hasUnsavedChanges && currentFile) {
+				await saveCurrentFile(true);
+			}
+			
+			currentFile = file;
+			content = file.content;
+			hasUnsavedChanges = false;
+			
+			// Initialize collaboration when loading a file
+			if ($auth.user) {
+				currentCollaboration = await initializeCollaboration({
+					documentId: file.$id,
+					userId: $auth.user.$id,
+					userName: $auth.user.name || 'Anonymous',
+					initialContent: file.content,
+					onContentChange: (newContent) => {
+						// Only update content if it's different to prevent loops
+						if (newContent !== content) {
+							content = newContent;
+						}
+					},
+					onPresenceChange: (presence) => {
+						userPresence = presence;
+					}
+				});
+			}
+			
+			// Reset history when loading new file
+			contentHistory = [];
+			historyIndex = -1;
+			errorMessage = null;
+		} catch (error) {
+			console.error('Error loading file:', error);
+			errorMessage = 'Failed to load file';
+		}
+	};
+
+	// Handle cursor position changes
+	const handleCursorChange = () => {
+		if (currentCollaboration && textArea) {
+			currentCollaboration.updatePresence({
+				start: textArea.selectionStart,
+				end: textArea.selectionEnd
+			});
+		}
+	};
+
 	onMount(async () => {
 		const saved = localStorage.getItem("preferences");
 		if (saved) {
@@ -670,13 +737,19 @@
 			clearTimeout(autoSaveTimeout);
 		}
 		hasUnsavedChanges = true;
-		// Still update files array optimistically for UI
+		
+		// Update files array optimistically for UI
 		const fileToUpdate = currentFile;
 		files = files.map(file => 
 			file.$id === fileToUpdate.$id 
 				? { ...file, title: fileToUpdate.title, content }
 				: file
 		);
+
+		// Save content through collaboration
+		if (currentCollaboration) {
+			currentCollaboration.saveContent(content);
+		}
 	}
 
 	onMount(() => {
@@ -698,6 +771,9 @@
 			if (autoSaveTimeout) {
 				clearTimeout(autoSaveTimeout);
 			}
+			if (currentCollaboration) {
+				currentCollaboration.cleanup();
+			}
 		};
 	});
 
@@ -709,28 +785,27 @@
 
 	let isSaving = false;
 
-	const loadFile = async (file: AppwriteDocument) => {
-		try {
-			// Save current file if there are unsaved changes
-			if (hasUnsavedChanges && currentFile) {
-				await saveCurrentFile(true);
-			}
-			
-			currentFile = file;
-			content = file.content;
-			hasUnsavedChanges = false;
-			// Reset history when loading new file
-			contentHistory = [];
-			historyIndex = -1;
-			errorMessage = null;
-		} catch (error) {
-			console.error('Error loading file:', error);
-			errorMessage = 'Failed to load file';
-		}
-	};
-
 	let isProfileMenuOpen = false;
 	let isHelpModalOpen = false;
+
+	// Add helper function to calculate cursor position
+	function calculateCursorPosition(index: number) {
+		if (!textArea) return { top: 0, left: 0 };
+
+		const text = textArea.value.substring(0, index);
+		const lines = text.split('\n');
+		const lineNumber = lines.length - 1;
+		const charPosition = lines[lines.length - 1].length;
+
+		// Calculate position based on font metrics
+		const lineHeight = 20; // Adjust based on your font size
+		const charWidth = 8;   // Adjust based on your font
+
+		return {
+			top: lineNumber * lineHeight + 24, // Add padding offset
+			left: charPosition * charWidth + 24 // Add padding offset
+		};
+	}
 </script>
 
 <svelte:document />
@@ -961,13 +1036,38 @@
 				class="w-1/2 flex flex-col h-full border-r border-gray-700"
 				class:hidden={viewMode}
 			>
-				<div class="h-full flex flex-col">
+				<div class="h-full flex flex-col relative">
 					<textarea
 						bind:this={textArea}
 						class="flex-1 resize-none appearance-none overflow-y-auto p-6 font-mono text-sm transition placeholder:text-gray-400 focus:outline-none text-gray-50 bg-gray-950"
 						placeholder="# Title"
 						bind:value={content}
+						on:select={handleCursorChange}
+						on:click={handleCursorChange}
+						on:keyup={handleCursorChange}
 					></textarea>
+
+					<!-- Add cursor indicators for other users -->
+					{#if userPresence && Object.keys(userPresence).length > 0}
+						<div class="absolute inset-0 pointer-events-none">
+							{#each Object.entries(userPresence) as [userId, user]}
+								{#if userId !== $auth.user?.$id && user.cursor}
+									<div 
+										class="absolute h-5 w-0.5 bg-blue-500 transition-all duration-100"
+										style="
+											top: {calculateCursorPosition(user.cursor.start).top}px;
+											left: {calculateCursorPosition(user.cursor.start).left}px;
+										"
+									>
+										<div class="absolute top-0 left-2 whitespace-nowrap bg-blue-500 text-white text-xs px-2 py-1 rounded">
+											{user.name}
+										</div>
+									</div>
+								{/if}
+							{/each}
+						</div>
+					{/if}
+
 					<!-- Formatting toolbar -->
 					<div class="flex flex-wrap p-3 border-t border-gray-700 bg-gray-900" class:hidden={preferences.focusMode}>
 						<button

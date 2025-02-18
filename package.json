@@ -11,7 +11,8 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
-		"deps": "bunx npm-check-updates@latest --interactive --format group"
+		"deps": "bunx npm-check-updates@latest --interactive --format group",
+		"signaling": "set PORT=4444 && node node_modules/y-webrtc/bin/server.js"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.2",
@@ -40,6 +41,9 @@
 		"mammoth": "^1.9.0",
 		"pdfjs-dist": "^4.10.38",
 		"showdown": "^2.1.0",
-		"tesseract.js": "^6.0.0"
+		"tesseract.js": "^6.0.0",
+		"uuid": "^11.0.5",
+		"y-webrtc": "^10.3.0",
+		"yjs": "^13.6.23"
 	}
 }

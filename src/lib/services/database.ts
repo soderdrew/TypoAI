@@ -8,7 +8,7 @@ const client = new Client()
 const databases = new Databases(client);
 
 // Database and collection IDs
-const DATABASE_ID = '67b3db120006af715399';  // Updated to match your database ID
+const DATABASE_ID = import.meta.env.VITE_APPWRITE_DATABASE_ID;  // Updated to match your database ID
 const PROFILES_COLLECTION_ID = 'profiles';
 const DOCUMENTS_COLLECTION_ID = 'documents';
 
