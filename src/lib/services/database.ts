@@ -258,5 +258,88 @@ export const databaseService = {
             console.error('Error removing collaborator:', error);
             throw error;
         }
+    },
+
+    async saveFile(title: string, content: string, userId: string): Promise<SharedDocument> {
+        try {
+            const doc = await databases.createDocument(
+                DATABASE_ID,
+                DOCUMENTS_COLLECTION_ID,
+                ID.unique(),
+                {
+                    title,
+                    content,
+                    ownerId: userId,
+                    collaborators: [userId],
+                    isPublic: false,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                }
+            );
+            return doc as unknown as SharedDocument;
+        } catch (error) {
+            console.error('Error saving file:', error);
+            throw error;
+        }
+    },
+
+    async getAllFiles(userId: string): Promise<SharedDocument[]> {
+        try {
+            const { documents } = await databases.listDocuments(
+                DATABASE_ID,
+                DOCUMENTS_COLLECTION_ID,
+                [Query.equal("ownerId", userId)]
+            );
+            return documents as unknown as SharedDocument[];
+        } catch (error) {
+            console.error('Error getting all files:', error);
+            throw error;
+        }
+    },
+
+    async getFile(fileId: string): Promise<SharedDocument> {
+        try {
+            const doc = await databases.getDocument(
+                DATABASE_ID,
+                DOCUMENTS_COLLECTION_ID,
+                fileId
+            );
+            return doc as unknown as SharedDocument;
+        } catch (error) {
+            console.error('Error getting file:', error);
+            throw error;
+        }
+    },
+
+    async updateFile(fileId: string, content: string, title: string): Promise<SharedDocument> {
+        try {
+            const doc = await databases.updateDocument(
+                DATABASE_ID,
+                DOCUMENTS_COLLECTION_ID,
+                fileId,
+                {
+                    content,
+                    title,
+                    updatedAt: new Date().toISOString()
+                }
+            );
+            return doc as unknown as SharedDocument;
+        } catch (error) {
+            console.error('Error updating file:', error);
+            throw error;
+        }
+    },
+
+    async deleteFile(fileId: string): Promise<void> {
+        try {
+            await databases.deleteDocument(
+                DATABASE_ID,
+                DOCUMENTS_COLLECTION_ID,
+                fileId
+            );
+        } catch (error) {
+            console.error('Error deleting file:', error);
+            throw error;
+        }
     }
 }; 

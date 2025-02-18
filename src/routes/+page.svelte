@@ -42,6 +42,11 @@
 	import { authService } from '$lib/services/appwrite';
 	import Auth from '$lib/components/Auth.svelte';
 
+	import FilesSidebar from '$lib/components/FilesSidebar.svelte';
+	import Files from '$lib/components/svg/Files.svelte';
+	import { databaseService } from '$lib/services/database';
+	import type { SharedDocument } from '$lib/services/database';
+
 	inject({ mode: dev ? "development" : "production" });
 
 	/** raw text that the user enters into the `textarea` element */
@@ -490,6 +495,10 @@
 					e.preventDefault();
 					toggleFocusMode();
 					break;
+				case '\\':
+					e.preventDefault();
+					isSidebarOpen = !isSidebarOpen;
+					break;
 			}
 		}
 	};
@@ -507,6 +516,100 @@
 		errorMessage = null;
 	};
 
+	let lastSaveTime = 0;
+	const SAVE_INTERVAL = 60000; // 1 minute in milliseconds
+
+	const saveCurrentFile = async (force = false) => {
+		if (!currentFile || !$auth.user) return;
+		
+		const now = Date.now();
+		if (!force && now - lastSaveTime < SAVE_INTERVAL) {
+			clearTimeout(autoSaveTimeout);
+			autoSaveTimeout = setTimeout(() => saveCurrentFile(true), SAVE_INTERVAL - (now - lastSaveTime));
+			return;
+		}
+		
+		// Create a non-null reference since we checked above
+		const fileToUpdate = currentFile;
+		
+		try {
+			isSaving = true;
+			
+			// Optimistically update the local files array
+			files = files.map(file => 
+				file.$id === fileToUpdate.$id 
+					? { ...file, title: fileToUpdate.title, content: content }
+					: file
+			);
+			
+			// Save to server in background
+			const updatedFile = await databaseService.updateFile(
+				fileToUpdate.$id,
+				content,
+				fileToUpdate.title
+			) as AppwriteDocument;
+			
+			currentFile = updatedFile;
+			lastSaveTime = now;
+			errorMessage = null;
+			
+			// Quietly sync with server in background
+			loadFiles().catch(error => {
+				console.error('Error syncing files:', error);
+			});
+			
+		} catch (error) {
+			console.error('Error saving file:', error);
+			errorMessage = 'Failed to save file';
+			// Revert optimistic update on error
+			loadFiles();
+		} finally {
+			setTimeout(() => {
+				isSaving = false;
+			}, 1000);
+		}
+	};
+
+	const createNewFile = async () => {
+		if (!$auth.user) return;
+		
+		try {
+			const newFile = await databaseService.saveFile('Untitled', '', $auth.user.$id) as AppwriteDocument;
+			currentFile = newFile;
+			content = '';
+			// Reset history when creating new file
+			contentHistory = [];
+			historyIndex = -1;
+			// Trigger files reload
+			await loadFiles();
+		} catch (error) {
+			console.error('Error creating new file:', error);
+			errorMessage = 'Failed to create new file';
+		}
+	};
+
+	let files: AppwriteDocument[] = [];
+	let loading = true;
+	let error: string | null = null;
+
+	async function loadFiles() {
+		if (!$auth.user) return;
+		
+		try {
+			loading = true;
+			const fetchedFiles = await databaseService.getAllFiles($auth.user.$id) as AppwriteDocument[];
+			// Sort files by updatedAt in descending order (most recent first)
+			files = fetchedFiles.sort((a, b) => 
+				new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+			);
+		} catch (err) {
+			error = 'Failed to load files';
+			console.error('Error loading files:', err);
+		} finally {
+			loading = false;
+		}
+	}
+
 	onMount(async () => {
 		const saved = localStorage.getItem("preferences");
 		if (saved) {
@@ -519,6 +622,9 @@
 		
 		// Check for existing session
 		await authService.checkSession();
+		
+		// Initial files load
+		await loadFiles();
 	});
 
 	afterUpdate(async () => {
@@ -544,9 +650,56 @@
 			console.error('Error logging out:', error);
 		}
 	};
+
+	interface AppwriteDocument extends SharedDocument {
+		$id: string;
+	}
+
+	/** Current file being edited */
+	let currentFile: AppwriteDocument | null = null;
+	let isSidebarOpen = false;
+	let autoSaveTimeout: ReturnType<typeof setTimeout>;
+
+	// Modify the auto-save reactive statement
+	$: if (content && currentFile) {
+		clearTimeout(autoSaveTimeout);
+		autoSaveTimeout = setTimeout(() => saveCurrentFile(false), 1000);
+	}
+
+	onMount(() => {
+		return () => {
+			if (autoSaveTimeout) {
+				clearTimeout(autoSaveTimeout);
+			}
+		};
+	});
+
+	let showTextStyleMenu = false;
+	let showInsertMenu = false;
+
+	let textStyleTooltip = false;
+	let insertTooltip = false;
+
+	let isSaving = false;
+
+	const loadFile = async (file: AppwriteDocument) => {
+		try {
+			currentFile = file;
+			content = file.content;
+			// Reset history when loading new file
+			contentHistory = [];
+			historyIndex = -1;
+			errorMessage = null;
+		} catch (error) {
+			console.error('Error loading file:', error);
+			errorMessage = 'Failed to load file';
+		}
+	};
 </script>
 
 <svelte:document />
+
+<svelte:window on:keyup={onKeyUp} on:keydown={onKeyDown} />
 
 {#if $auth.isLoading}
 	<div class="flex h-screen items-center justify-center bg-gray-950 text-gray-50">
@@ -558,141 +711,192 @@
 {:else if !$auth.isAuthenticated && !$auth.isLocal}
 	<Auth />
 {:else}
-	<main 
-		class="h-screen flex flex-col bg-gray-950 text-gray-50"
-		role="application"
-		aria-label="Markdown Editor"
-		on:keydown={onKeyDown} 
-		on:keyup={onKeyUp}
-		on:drop={dropFile}
-		on:dragover|preventDefault
-		tabindex="0"
-	>
-		<!-- Top toolbar -->
-		<header class="transition-all duration-300 border-b border-gray-700" class:hidden={preferences.focusMode}>
-			{#if !viewMode}
-				<div class="flex justify-between p-3 text-sm">
-					<nav class="flex w-full items-center justify-between sm:w-fit">
-						<div class="flex">
-							{#if supported}
-								<button
-									title="Open (or drag and drop)"
-									class="button"
-									on:click={open}
-								>
-									<Open />
-									<span class="hidden lg:inline">Open</span>
-								</button>
-								<button title="Save As" class="button" on:click={saveAs}>
-									<Save />
-									<span class="hidden lg:inline">Save As</span>
-								</button>
-							{:else}
-								<a
-									href="data:text/plain,{content}"
-									download="Untitled.md"
-									title="Download"
-									class="button"
-								>
-									<Save />
-									<span class="hidden lg:inline">Download</span>
-								</a>
-							{/if}
-							<drab-copy value={content} class="contents">
-								<button data-trigger class="button">
-									<span data-content>
-										<Copy />
-									</span>
-									<template data-swap>
-										<CopyComplete />
-									</template>
-									<span class="hidden lg:inline">Copy</span>
-								</button>
-							</drab-copy>
+	<FilesSidebar
+		isOpen={isSidebarOpen}
+		currentFileId={currentFile?.$id}
+		onFileSelect={loadFile}
+		{files}
+		{loading}
+		{error}
+	/>
 
-							<drab-copy value={html} class="contents">
-								<button data-trigger title="Copy HTML" class="button">
-									<span data-content>
-										<Code />
-									</span>
-									<template data-swap>
-										<CopyComplete />
-									</template>
-									<span class="hidden lg:inline">Copy</span>
-								</button>
-							</drab-copy>
-							<PrintButton innerHtml={html} />
-							<button title="Format" on:click={fmt} class="button">
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 24 24"
-									fill="currentColor"
-									class="h-5 w-5"
-								>
-									<path
-										fill-rule="evenodd"
-										d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0016.5 9h-1.875a1.875 1.875 0 01-1.875-1.875V5.25A3.75 3.75 0 009 1.5H5.625zM7.5 15a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5A.75.75 0 017.5 15zm.75 2.25a.75.75 0 000 1.5H12a.75.75 0 000-1.5H8.25z"
-										clip-rule="evenodd"
-									/>
-									<path
-										d="M12.971 1.816A5.23 5.23 0 0114.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 013.434 1.279 9.768 9.768 0 00-6.963-6.963z"
-									/>
-								</svg>
-								<span class="hidden lg:inline">Format</span>
-							</button>
-							<button title="View" class="button lg:hidden" on:click={toggleView}>
-								<View />
-							</button>
+	<div class="flex flex-col h-screen {isSidebarOpen ? 'pl-64' : ''} transition-all duration-200 bg-gray-950 text-gray-50">
+		<header class="fixed top-0 left-0 right-0 z-50 bg-gray-950 border-b border-gray-700">
+			<div class="flex items-center justify-between px-4 h-16">
+				<div class="flex items-center space-x-2">
+					<!-- Toggle Sidebar Button -->
+					<button
+						title="Toggle Files Sidebar (Ctrl/Cmd + \)"
+						class="button"
+						on:click={() => isSidebarOpen = !isSidebarOpen}
+					>
+						<Files />
+					</button>
+
+					<!-- New File Button -->
+					<button
+						title="New File"
+						class="button"
+						on:click={createNewFile}
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+						</svg>
+						
+					</button>
+
+					{#if currentFile}
+						<div class="flex items-center space-x-2">
+							<input
+								type="text"
+								bind:value={currentFile.title}
+								class="px-2 py-1 text-lg font-medium bg-transparent border border-transparent hover:border-gray-700 focus:border-blue-500 rounded text-gray-50 transition-colors duration-150 focus:outline-none"
+								placeholder="Untitled"
+								on:blur={() => saveCurrentFile(true)}
+							/>
+							{#if isSaving}
+								<div class="flex items-center text-gray-400 text-sm">
+									<svg class="animate-spin h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+									</svg>
+									<span>Saving...</span>
+								</div>
+							{/if}
 						</div>
-					</nav>
-					<div class="flex items-center gap-4">
-						{#if $auth.isAuthenticated}
-							<span class="text-gray-400">{$auth.user?.name}</span>
+					{/if}
+				</div>
+
+				<!-- Right side of header -->
+				<div class="flex items-center space-x-4">
+					<!-- Existing toolbar buttons -->
+					<div class="flex items-center space-x-2">
+						{#if supported}
+							<button
+								title="Open (or drag and drop)"
+								class="button"
+								on:click={open}
+							>
+								<Open />
+								<span class="hidden lg:inline">Open</span>
+							</button>
+							<button title="Save As" class="button" on:click={saveAs}>
+								<Save />
+								<span class="hidden lg:inline">Save As</span>
+							</button>
+						{:else}
+							<a
+								href="data:text/plain,{content}"
+								download="Untitled.md"
+								title="Download"
+								class="button"
+							>
+								<Save />
+								<span class="hidden lg:inline">Download</span>
+							</a>
+						{/if}
+						<drab-copy value={content} class="contents">
+							<button data-trigger class="button">
+								<span data-content>
+									<Copy />
+								</span>
+								<template data-swap>
+									<CopyComplete />
+								</template>
+								<span class="hidden lg:inline">Copy</span>
+							</button>
+						</drab-copy>
+
+						<drab-copy value={html} class="contents">
+							<button data-trigger title="Copy HTML" class="button">
+								<span data-content>
+									<Code />
+								</span>
+								<template data-swap>
+									<CopyComplete />
+								</template>
+								<span class="hidden lg:inline">Copy</span>
+							</button>
+						</drab-copy>
+						<PrintButton innerHtml={html} />
+						<button title="Format" on:click={fmt} class="button">
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 24 24"
+								fill="currentColor"
+								class="h-5 w-5"
+							>
+								<path
+									fill-rule="evenodd"
+									d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0016.5 9h-1.875a1.875 1.875 0 01-1.875-1.875V5.25A3.75 3.75 0 009 1.5H5.625zM7.5 15a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5A.75.75 0 017.5 15zm.75 2.25a.75.75 0 000 1.5H12a.75.75 0 000-1.5H8.25z"
+									clip-rule="evenodd"
+								/>
+								<path
+									d="M12.971 1.816A5.23 5.23 0 0114.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 013.434 1.279 9.768 9.768 0 00-6.963-6.963z"
+								/>
+							</svg>
+							<span class="hidden lg:inline">Format</span>
+						</button>
+						<button title="View" class="button lg:hidden" on:click={toggleView}>
+							<View />
+						</button>
+					</div>
+
+					<!-- User info and logout -->
+					{#if $auth.user}
+						<div class="flex items-center space-x-4 text-gray-300">
+							<span>{$auth.user.name}</span>
 							<button 
 								class="button"
 								on:click={handleLogout}
 							>
 								Sign out
 							</button>
-						{/if}
-						<div class="hidden px-4 py-2 font-bold sm:block">
-							{file?.name ? file.name : "TypoAI"}
 						</div>
-					</div>
+					{/if}
 				</div>
-				{#if errorMessage}
-					<div class="bg-red-950 text-red-100 px-4 py-2 text-sm flex justify-between items-center">
-						<span>{errorMessage}</span>
-						<button 
-							class="ml-4 text-red-100 hover:text-white focus:outline-none" 
-							on:click={clearError}
-							title="Dismiss"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-								<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-							</svg>
-						</button>
-					</div>
-				{/if}
+			</div>
+
+			<!-- Error message -->
+			{#if errorMessage}
+				<div class="bg-red-950 text-red-100 px-4 py-2 text-sm flex justify-between items-center">
+					<span>{errorMessage}</span>
+					<button 
+						class="ml-4 text-red-100 hover:text-white focus:outline-none" 
+						on:click={clearError}
+						title="Dismiss"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+							<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+						</svg>
+					</button>
+				</div>
 			{/if}
 		</header>
 
-		<!-- Main content area -->
-		<main class="flex-1 flex overflow-hidden">
+		<!-- Main content -->
+		<main 
+			class="flex-1 pt-16 flex"
+			role="application"
+			aria-label="Markdown Editor"
+			on:drop={dropFile}
+			on:dragover|preventDefault
+			tabindex="0"
+		>
 			<!-- Editor pane -->
 			<div
-				class="w-1/2 flex flex-col h-full"
+				class="w-1/2 flex flex-col h-full border-r border-gray-700"
 				class:hidden={viewMode}
 			>
-				<drab-editor class="h-full flex flex-col">
+				<div class="h-full flex flex-col">
 					<textarea
 						bind:this={textArea}
-						data-content
-						class="flex-1 resize-none appearance-none overflow-y-auto p-6 font-mono text-sm transition placeholder:text-gray-400 focus:outline-none {colors.dark[preferences.color]}"
+						class="flex-1 resize-none appearance-none overflow-y-auto p-6 font-mono text-sm transition placeholder:text-gray-400 focus:outline-none text-gray-50 bg-gray-950"
 						placeholder="# Title"
 						bind:value={content}
 					></textarea>
-					<div class="flex flex-wrap p-3 border-t border-gray-700 transition-all duration-300" class:hidden={preferences.focusMode}>
+					<!-- Formatting toolbar -->
+					<div class="flex flex-wrap p-3 border-t border-gray-700 bg-gray-900" class:hidden={preferences.focusMode}>
 						<button
 							data-trigger
 							class="button"
@@ -720,93 +924,170 @@
 						>
 							<Blockquote />
 						</button>
-						<button
-							data-trigger
-							class="button italic"
-							title="Italic (Ctrl/Cmd + I)"
-							data-value="*"
-							data-type="wrap"
-						>
-							I
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Bold (Ctrl/Cmd + B)"
-							data-value="**"
-							data-type="wrap"
-						>
-							B
-						</button>
-						<button
-							data-trigger
-							class="button underline"
-							title="Underline (Ctrl/Cmd + U)"
-							data-value="<ins>"
-							data-type="wrap"
-							data-end-value="</ins>"
-						>
-							U
-						</button>
-						<button
-							data-trigger
-							class="button font-normal line-through"
-							title="Strikethrough (~)"
-							data-value="~"
-							data-type="wrap"
-						>
-							S
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Link (Ctrl/Cmd + K)"
-							data-value="[text](href)"
-							data-type="inline"
-							data-key="["
-						>
-							<span>
-								<Anchor />
-							</span>
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Image (![alt](src))"
-							data-value="![alt](src)"
-							data-type="inline"
-							data-key="]"
-						>
-							<Image />
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Table"
-							data-value={"| th  | th  |\n| --- | --- |\n| td  | td  |\n| td  | td  |"}
-							data-type="inline"
-							data-key={"\\"}
-						>
-							<Table />
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Code (`)"
-							data-value={"`"}
-							data-type="wrap"
-						>
-							<CodeBracket />
-						</button>
-						<button
-							data-trigger
-							class="button"
-							title="Slide (---)"
-							data-value="---"
-							data-type="inline"
-						>
-							<Slideshow />
-						</button>
+
+						<!-- Text Style Dropdown -->
+						<div class="relative">
+							<button
+								class="button"
+								title="Text Style"
+								on:click={() => {
+									showTextStyleMenu = !showTextStyleMenu;
+									showInsertMenu = false;
+								}}
+								on:mouseenter={() => textStyleTooltip = true}
+								on:mouseleave={() => textStyleTooltip = false}
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+									<path d="M13.197 3.003h-2.396l-3.2 14h2.396l3.2-14zm-7.2 14h2.396l3.2-14H9.197l-3.2 14z"/>
+								</svg>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-1" viewBox="0 0 20 20" fill="currentColor">
+									<path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+								</svg>
+							</button>
+							{#if textStyleTooltip && !showTextStyleMenu}
+								<div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-gray-100 text-sm rounded whitespace-nowrap">
+									Text Formatting Options
+									<div class="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 border-4 border-transparent border-t-gray-800"></div>
+								</div>
+							{/if}
+							{#if showTextStyleMenu}
+								<div class="absolute bottom-full left-0 mb-2 bg-gray-800 rounded-lg shadow-lg z-50 py-1 min-w-[150px]">
+									<button
+										data-trigger
+										class="w-full px-4 py-2 text-left hover:bg-gray-700 flex items-center"
+										title="Bold (Ctrl/Cmd + B)"
+										data-value="**"
+										data-type="wrap"
+									>
+										<span class="font-bold">B</span>
+										<span class="ml-3 text-sm">Bold</span>
+										<span class="ml-auto text-xs text-gray-400">⌘B</span>
+									</button>
+									<button
+										data-trigger
+										class="w-full px-4 py-2 text-left hover:bg-gray-700 flex items-center"
+										title="Italic (Ctrl/Cmd + I)"
+										data-value="*"
+										data-type="wrap"
+									>
+										<span class="italic">I</span>
+										<span class="ml-3 text-sm">Italic</span>
+										<span class="ml-auto text-xs text-gray-400">⌘I</span>
+									</button>
+									<button
+										data-trigger
+										class="w-full px-4 py-2 text-left hover:bg-gray-700 flex items-center"
+										title="Underline (Ctrl/Cmd + U)"
+										data-value="<ins>"
+										data-type="wrap"
+										data-end-value="</ins>"
+									>
+										<span class="underline">U</span>
+										<span class="ml-3 text-sm">Underline</span>
+										<span class="ml-auto text-xs text-gray-400">⌘U</span>
+									</button>
+									<button
+										data-trigger
+										class="w-full px-4 py-2 text-left hover:bg-gray-700 flex items-center"
+										title="Strikethrough (~)"
+										data-value="~"
+										data-type="wrap"
+									>
+										<span class="line-through">S</span>
+										<span class="ml-3 text-sm">Strikethrough</span>
+										<span class="ml-auto text-xs text-gray-400">~</span>
+									</button>
+									<div class="absolute bottom-0 left-4 translate-y-full border-4 border-transparent border-t-gray-800"></div>
+								</div>
+							{/if}
+						</div>
+
+						<!-- Insert Menu Dropdown -->
+						<div class="relative">
+							<button
+								class="button"
+								title="Insert"
+								on:click={() => {
+									showInsertMenu = !showInsertMenu;
+									showTextStyleMenu = false;
+								}}
+								on:mouseenter={() => insertTooltip = true}
+								on:mouseleave={() => insertTooltip = false}
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+									<path fill-rule="evenodd" d="M10 3a1 1 0 00-1 1v4H5a1 1 0 100 2h4v4a1 1 0 102 0v-4h4a1 1 0 100-2h-4V4a1 1 0 00-1-1z" clip-rule="evenodd" />
+								</svg>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-1" viewBox="0 0 20 20" fill="currentColor">
+									<path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+								</svg>
+							</button>
+							{#if insertTooltip && !showInsertMenu}
+								<div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-gray-100 text-sm rounded whitespace-nowrap">
+									Insert Content
+									<div class="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 border-4 border-transparent border-t-gray-800"></div>
+								</div>
+							{/if}
+							{#if showInsertMenu}
+								<div class="absolute bottom-full left-0 mb-2 bg-gray-800 rounded-lg shadow-lg z-50 py-1 min-w-[150px]">
+									<button
+										data-trigger
+										class="w-full px-4 py-2 text-left hover:bg-gray-700 flex items-center"
+										title="Link (Ctrl/Cmd + K)"
+										data-value="[text](href)"
+										data-type="inline"
+										data-key="["
+									>
+										<Anchor />
+										<span class="ml-3 text-sm">Link</span>
+										<span class="ml-auto text-xs text-gray-400">⌘K</span>
+									</button>
+									<button
+										data-trigger
+										class="w-full px-4 py-2 text-left hover:bg-gray-700 flex items-center"
+										title="Image"
+										data-value="![alt](src)"
+										data-type="inline"
+										data-key="]"
+									>
+										<Image />
+										<span class="ml-3 text-sm">Image</span>
+									</button>
+									<button
+										data-trigger
+										class="w-full px-4 py-2 text-left hover:bg-gray-700 flex items-center"
+										title="Table"
+										data-value={"| th  | th  |\n| --- | --- |\n| td  | td  |\n| td  | td  |"}
+										data-type="inline"
+										data-key={"\\"}
+									>
+										<Table />
+										<span class="ml-3 text-sm">Table</span>
+									</button>
+									<button
+										data-trigger
+										class="w-full px-4 py-2 text-left hover:bg-gray-700 flex items-center"
+										title="Code"
+										data-value={"`"}
+										data-type="wrap"
+									>
+										<CodeBracket />
+										<span class="ml-3 text-sm">Code</span>
+									</button>
+									<button
+										data-trigger
+										class="w-full px-4 py-2 text-left hover:bg-gray-700 flex items-center"
+										title="Slide"
+										data-value="---"
+										data-type="inline"
+									>
+										<Slideshow />
+										<span class="ml-3 text-sm">Slide</span>
+									</button>
+									<div class="absolute bottom-0 left-4 translate-y-full border-4 border-transparent border-t-gray-800"></div>
+								</div>
+							{/if}
+						</div>
+
 						<button
 							class="button"
 							title="Toggle Focus Mode (Ctrl/Cmd + M)"
@@ -815,7 +1096,7 @@
 							<Focus />
 						</button>
 					</div>
-				</drab-editor>
+				</div>
 			</div>
 
 			<!-- Preview pane -->
@@ -823,7 +1104,7 @@
 				style="view-transition-name: preview;"
 				class="w-1/2 flex flex-col {viewMode ? 'w-full' : ''}"
 			>
-				<div class="flex-1 overflow-y-auto bg-white dark:bg-gray-950">
+				<div class="flex-1 overflow-y-auto bg-gray-950">
 					<div
 						class="prose prose-gray mx-auto h-full max-w-[72ch] break-words p-8 transition-[font-size] dark:prose-invert prose-img:rounded-lg {fontSizes[preferences.fontSize]} {colors.prose[preferences.color]} {fontFamilies[preferences.fontFamily]}"
 					>
@@ -836,11 +1117,7 @@
 				</div>
 				<!-- Preview controls -->
 				<div
-					class="flex justify-between p-3 border-t border-gray-700"
-					class:bg-white={viewMode}
-					class:text-gray-950={viewMode}
-					class:dark:bg-gray-950={viewMode}
-					class:dark:text-gray-50={viewMode}
+					class="flex justify-between p-3 border-t border-gray-700 bg-gray-900"
 				>
 					<!-- viewType controls -->
 					<div class="flex">
@@ -945,5 +1222,64 @@
 				</div>
 			</div>
 		</main>
-	</main>
+	</div>
 {/if}
+
+<style>
+	.button {
+		@apply p-2 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors duration-150 flex items-center;
+	}
+
+	:global(.dark) .button {
+		@apply text-gray-300 hover:text-white hover:bg-gray-700;
+	}
+
+	:global(drab-editor) {
+		display: none !important;
+	}
+
+	:global(.files-sidebar) {
+		@apply bg-gray-900 border-r border-gray-700;
+	}
+
+	:global(.files-sidebar .sidebar-header) {
+		@apply bg-gray-900 border-b border-gray-700;
+	}
+
+	:global(.files-sidebar .file-item) {
+		@apply text-gray-300 hover:text-white hover:bg-gray-700;
+	}
+
+	:global(.files-sidebar .file-item.active) {
+		@apply bg-gray-700 text-white;
+	}
+
+	textarea {
+		@apply flex-1 min-h-0;
+	}
+
+	/* Click outside to close dropdowns */
+	:global(body) {
+		@apply relative;
+	}
+
+	:global(body::before) {
+		content: '';
+		@apply fixed inset-0 z-40 hidden;
+	}
+
+	:global(body.dropdown-open::before) {
+		@apply block;
+	}
+</style>
+
+<svelte:body 
+	on:click={e => {
+		const target = e.target;
+		if (!(target instanceof Element) || !target.closest('.relative')) {
+			showTextStyleMenu = false;
+			showInsertMenu = false;
+		}
+	}}
+	class:dropdown-open={showTextStyleMenu || showInsertMenu}
+/>
