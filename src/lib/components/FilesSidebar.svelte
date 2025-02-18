@@ -29,6 +29,25 @@
         }
     }
 
+    async function deleteFile(event: MouseEvent, fileId: string) {
+        event.stopPropagation(); // Prevent file selection when clicking delete
+        
+        if (!confirm('Are you sure you want to delete this file?')) return;
+        
+        try {
+            await databaseService.deleteFile(fileId);
+            // Remove file from local array
+            files = files.filter(f => f.$id !== fileId);
+            // If the deleted file was the current file, select another file
+            if (currentFileId === fileId && files.length > 0) {
+                onFileSelect(files[0]);
+            }
+        } catch (err) {
+            error = 'Failed to delete file';
+            console.error('Error deleting file:', err);
+        }
+    }
+
     onMount(() => {
         loadFiles();
     });
@@ -52,13 +71,35 @@
             <div class="empty-state">No files yet</div>
         {:else}
             {#each files as file}
-                <button
-                    class="file-item {currentFileId === file.$id ? 'active' : ''}"
-                    on:click={() => onFileSelect(file)}
-                >
-                    <span class="file-title">{file.title || 'Untitled'}</span>
-                    <span class="file-date">{new Date(file.updatedAt).toLocaleDateString()}</span>
-                </button>
+                <div class="file-item-wrapper group">
+                    <button
+                        class="file-item {currentFileId === file.$id ? 'active' : ''}"
+                        on:click={() => onFileSelect(file)}
+                    >
+                        <span class="file-title">{file.title || 'Untitled'}</span>
+                        <span class="file-date">{new Date(file.updatedAt).toLocaleDateString()}</span>
+                    </button>
+                    <button
+                        class="delete-button opacity-0 group-hover:opacity-100"
+                        on:click={(e) => deleteFile(e, file.$id)}
+                        title="Delete file"
+                    >
+                        <svg 
+                            xmlns="http://www.w3.org/2000/svg" 
+                            class="h-4 w-4" 
+                            fill="none" 
+                            viewBox="0 0 24 24" 
+                            stroke="currentColor"
+                        >
+                            <path 
+                                stroke-linecap="round" 
+                                stroke-linejoin="round" 
+                                stroke-width="2" 
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" 
+                            />
+                        </svg>
+                    </button>
+                </div>
             {/each}
         {/if}
     </div>
@@ -86,6 +127,10 @@
         @apply p-2 space-y-1 overflow-y-auto max-h-[calc(100vh-4rem)];
     }
 
+    .file-item-wrapper {
+        @apply relative flex items-center;
+    }
+
     .file-item {
         @apply w-full px-3 py-2 text-left rounded text-gray-300 hover:text-white hover:bg-gray-700
                flex flex-col items-start transition-colors duration-150;
@@ -93,6 +138,11 @@
 
     .file-item.active {
         @apply bg-gray-700 text-white;
+    }
+
+    .delete-button {
+        @apply absolute right-2 p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded
+               transition-all duration-150;
     }
 
     .file-title {

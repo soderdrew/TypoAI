@@ -364,6 +364,10 @@
 
 	const toggleFocusMode = () => {
 		preferences.focusMode = !preferences.focusMode;
+		// Close sidebar when entering focus mode
+		if (preferences.focusMode && isSidebarOpen) {
+			isSidebarOpen = false;
+		}
 		savePreferences();
 	};
 
@@ -1315,19 +1319,19 @@
 							<div class="space-y-1 text-sm">
 								<div class="flex justify-between">
 									<span class="text-gray-400">Bold</span>
-									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + B</kbd>
+									<kbd class="px-2 py-1 bg-gray-700 text-white rounded text-xs">Ctrl/⌘ + B</kbd>
 								</div>
 								<div class="flex justify-between">
 									<span class="text-gray-400">Italic</span>
-									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + I</kbd>
+									<kbd class="px-2 py-1 bg-gray-700 text-white rounded text-xs">Ctrl/⌘ + I</kbd>
 								</div>
 								<div class="flex justify-between">
 									<span class="text-gray-400">Underline</span>
-									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + U</kbd>
+									<kbd class="px-2 py-1 bg-gray-700 text-white rounded text-xs">Ctrl/⌘ + U</kbd>
 								</div>
 								<div class="flex justify-between">
 									<span class="text-gray-400">Link</span>
-									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + K</kbd>
+									<kbd class="px-2 py-1 bg-gray-700 text-white rounded text-xs">Ctrl/⌘ + K</kbd>
 								</div>
 							</div>
 						</div>
@@ -1336,15 +1340,15 @@
 							<div class="space-y-1 text-sm">
 								<div class="flex justify-between">
 									<span class="text-gray-400">Save</span>
-									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + S</kbd>
+									<kbd class="px-2 py-1 bg-gray-700 text-white rounded text-xs">Ctrl/⌘ + S</kbd>
 								</div>
 								<div class="flex justify-between">
 									<span class="text-gray-400">Toggle Focus Mode</span>
-									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + M</kbd>
+									<kbd class="px-2 py-1 bg-gray-700 text-white rounded text-xs">Ctrl/⌘ + M</kbd>
 								</div>
 								<div class="flex justify-between">
 									<span class="text-gray-400">Toggle Sidebar</span>
-									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + \</kbd>
+									<kbd class="px-2 py-1 bg-gray-700 text-white rounded text-xs">Ctrl/⌘ + \</kbd>
 								</div>
 							</div>
 						</div>
