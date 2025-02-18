@@ -37,20 +37,31 @@
         loading = true;
         try {
             if (isLogin) {
+                // Login and ensure profile exists
+                console.log('Logging in user:', { email });
                 await authService.login(email, password);
+                const currentUser = await authService.getCurrentUser();
+                console.log('Current user after login:', currentUser);
+                if (currentUser) {
+                    await databaseService.ensureProfile(currentUser.$id, currentUser.name, email);
+                }
             } else {
                 // Create the account first
-                await authService.createAccount(email, password, name);
+                console.log('Creating new account:', { email, name });
+                const newAccount = await authService.createAccount(email, password, name);
+                console.log('Account created:', newAccount);
                 
                 // Then login
+                console.log('Logging in new user');
                 await authService.login(email, password);
                 
-                // Get the user details
+                // Get the user details and ensure profile exists
                 const currentUser = await authService.getCurrentUser();
-                
-                // Create user profile
+                console.log('Current user after signup:', currentUser);
                 if (currentUser) {
-                    await databaseService.createProfile(currentUser.$id, name, email);
+                    await databaseService.ensureProfile(currentUser.$id, name, email);
+                } else {
+                    console.error('Failed to get current user after signup');
                 }
             }
         } catch (err: any) {

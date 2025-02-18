@@ -7,8 +7,8 @@ const client = new Client()
 
 const databases = new Databases(client);
 
-// Database and collection IDs (create these in Appwrite Console)
-const DATABASE_ID = 'typo-ai';
+// Database and collection IDs
+const DATABASE_ID = '67b3db120006af715399';  // Updated to match your database ID
 const PROFILES_COLLECTION_ID = 'profiles';
 const DOCUMENTS_COLLECTION_ID = 'documents';
 
@@ -17,6 +17,8 @@ export interface UserProfile {
     name: string;
     email: string;
     createdAt: string;
+    documentsCount: number;
+    lastLoginAt: string;
 }
 
 export interface SharedDocument {
@@ -34,6 +36,14 @@ export const databaseService = {
     // User Profiles
     async createProfile(userId: string, name: string, email: string): Promise<UserProfile> {
         try {
+            console.log('Creating profile with:', {
+                databaseId: DATABASE_ID,
+                collectionId: PROFILES_COLLECTION_ID,
+                userId,
+                name,
+                email
+            });
+            
             const profile = await databases.createDocument(
                 DATABASE_ID,
                 PROFILES_COLLECTION_ID,
@@ -42,12 +52,40 @@ export const databaseService = {
                     userId,
                     name,
                     email,
-                    createdAt: new Date().toISOString()
+                    createdAt: new Date().toISOString(),
+                    documentsCount: 0,
+                    lastLoginAt: new Date().toISOString()
                 }
             );
+            console.log('Profile created successfully:', profile);
             return profile as unknown as UserProfile;
         } catch (error) {
-            console.error('Error creating profile:', error);
+            console.error('Error creating profile:', {
+                error,
+                databaseId: DATABASE_ID,
+                collectionId: PROFILES_COLLECTION_ID,
+                userId
+            });
+            throw error;
+        }
+    },
+
+    async ensureProfile(userId: string, name: string, email: string): Promise<UserProfile> {
+        try {
+            console.log('Ensuring profile exists for:', { userId, name, email });
+            // Try to get the profile
+            try {
+                const profile = await this.getProfile(userId);
+                console.log('Existing profile found:', profile);
+                // Update lastLoginAt
+                return await this.updateProfile(userId, { lastLoginAt: new Date().toISOString() });
+            } catch (error) {
+                console.log('No existing profile found, creating new one');
+                // If profile doesn't exist, create one
+                return await this.createProfile(userId, name, email);
+            }
+        } catch (error) {
+            console.error('Error ensuring profile:', error);
             throw error;
         }
     },
@@ -62,6 +100,21 @@ export const databaseService = {
             return profile as unknown as UserProfile;
         } catch (error) {
             console.error('Error getting profile:', error);
+            throw error;
+        }
+    },
+
+    async updateProfile(userId: string, updates: Partial<UserProfile>): Promise<UserProfile> {
+        try {
+            const profile = await databases.updateDocument(
+                DATABASE_ID,
+                PROFILES_COLLECTION_ID,
+                userId,
+                updates
+            );
+            return profile as unknown as UserProfile;
+        } catch (error) {
+            console.error('Error updating profile:', error);
             throw error;
         }
     },

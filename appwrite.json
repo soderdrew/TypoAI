@@ -10,7 +10,10 @@
                     "$id": "profiles",
                     "name": "User Profiles",
                     "$permissions": [
-                        "read(\"user:{{user.$id}}\")"
+                        "read(\"user:{{user.$id}}\")",
+                        "create(\"user:{{user.$id}}\")",
+                        "update(\"user:{{user.$id}}\")",
+                        "delete(\"user:{{user.$id}}\")"
                     ],
                     "attributes": [
                         {
@@ -36,6 +39,19 @@
                             "type": "string",
                             "required": true,
                             "array": false
+                        },
+                        {
+                            "key": "documentsCount",
+                            "type": "integer",
+                            "required": true,
+                            "array": false,
+                            "default": 0
+                        },
+                        {
+                            "key": "lastLoginAt",
+                            "type": "string",
+                            "required": true,
+                            "array": false
                         }
                     ],
                     "indexes": [
@@ -54,7 +70,12 @@
                 {
                     "$id": "documents",
                     "name": "Shared Documents",
-                    "$permissions": [],
+                    "$permissions": [
+                        "create(\"user:{{user.$id}}\")",
+                        "read(\"user:{{user.$id}}\")",
+                        "update(\"user:{{user.$id}}\")",
+                        "delete(\"user:{{user.$id}}\")"
+                    ],
                     "attributes": [
                         {
                             "key": "title",
