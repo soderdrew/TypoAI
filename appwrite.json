@@ -1,0 +1,131 @@
+{
+    "projectId": "typo-ai",
+    "projectName": "TypoAI",
+    "databases": [
+        {
+            "$id": "typo-ai",
+            "name": "TypoAI Database",
+            "collections": [
+                {
+                    "$id": "profiles",
+                    "name": "User Profiles",
+                    "$permissions": [
+                        "read(\"user:{{user.$id}}\")"
+                    ],
+                    "attributes": [
+                        {
+                            "key": "userId",
+                            "type": "string",
+                            "required": true,
+                            "array": false
+                        },
+                        {
+                            "key": "name",
+                            "type": "string",
+                            "required": true,
+                            "array": false
+                        },
+                        {
+                            "key": "email",
+                            "type": "string",
+                            "required": true,
+                            "array": false
+                        },
+                        {
+                            "key": "createdAt",
+                            "type": "string",
+                            "required": true,
+                            "array": false
+                        }
+                    ],
+                    "indexes": [
+                        {
+                            "key": "userId",
+                            "type": "key",
+                            "attributes": [
+                                "userId"
+                            ],
+                            "orders": [
+                                "ASC"
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "$id": "documents",
+                    "name": "Shared Documents",
+                    "$permissions": [],
+                    "attributes": [
+                        {
+                            "key": "title",
+                            "type": "string",
+                            "required": true,
+                            "array": false
+                        },
+                        {
+                            "key": "content",
+                            "type": "string",
+                            "required": true,
+                            "array": false,
+                            "size": 16777216
+                        },
+                        {
+                            "key": "ownerId",
+                            "type": "string",
+                            "required": true,
+                            "array": false
+                        },
+                        {
+                            "key": "collaborators",
+                            "type": "string",
+                            "required": true,
+                            "array": true,
+                            "size": 100
+                        },
+                        {
+                            "key": "isPublic",
+                            "type": "boolean",
+                            "required": true,
+                            "array": false,
+                            "default": false
+                        },
+                        {
+                            "key": "createdAt",
+                            "type": "string",
+                            "required": true,
+                            "array": false
+                        },
+                        {
+                            "key": "updatedAt",
+                            "type": "string",
+                            "required": true,
+                            "array": false
+                        }
+                    ],
+                    "indexes": [
+                        {
+                            "key": "ownerId",
+                            "type": "key",
+                            "attributes": [
+                                "ownerId"
+                            ],
+                            "orders": [
+                                "ASC"
+                            ]
+                        },
+                        {
+                            "key": "collaborators",
+                            "type": "key",
+                            "attributes": [
+                                "collaborators"
+                            ],
+                            "orders": [
+                                "ASC"
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

@@ -2,7 +2,7 @@
 
 Write content in <a href="https://www.markdownguide.org/cheat-sheet/#basic-syntax" target="_blank">markdown</a>!
 
-Leave feedback or contribute to the project on <a href="https://github.com/rossrobino/typo" target="_blank">GitHub</a>.
+Leave feedback or contribute to the project on <a href="https://github.com/soderdrew/TypoAI" target="_blank">GitHub</a>.
 
 ---
 
