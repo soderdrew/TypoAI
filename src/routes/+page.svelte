@@ -516,33 +516,20 @@
 		errorMessage = null;
 	};
 
-	let lastSaveTime = 0;
-	const SAVE_INTERVAL = 60000; // 1 minute in milliseconds
+	let hasUnsavedChanges = false;
 
 	const saveCurrentFile = async (force = false) => {
 		if (!currentFile || !$auth.user) return;
 		
-		const now = Date.now();
-		if (!force && now - lastSaveTime < SAVE_INTERVAL) {
-			clearTimeout(autoSaveTimeout);
-			autoSaveTimeout = setTimeout(() => saveCurrentFile(true), SAVE_INTERVAL - (now - lastSaveTime));
-			return;
-		}
+		// If not forced and no unsaved changes, don't save
+		if (!force && !hasUnsavedChanges) return;
 		
-		// Create a non-null reference since we checked above
 		const fileToUpdate = currentFile;
 		
 		try {
 			isSaving = true;
 			
-			// Optimistically update the local files array
-			files = files.map(file => 
-				file.$id === fileToUpdate.$id 
-					? { ...file, title: fileToUpdate.title, content: content }
-					: file
-			);
-			
-			// Save to server in background
+			// Save to server
 			const updatedFile = await databaseService.updateFile(
 				fileToUpdate.$id,
 				content,
@@ -550,7 +537,7 @@
 			) as AppwriteDocument;
 			
 			currentFile = updatedFile;
-			lastSaveTime = now;
+			hasUnsavedChanges = false;
 			errorMessage = null;
 			
 			// Quietly sync with server in background
@@ -574,9 +561,15 @@
 		if (!$auth.user) return;
 		
 		try {
+			// Save current file if there are unsaved changes
+			if (hasUnsavedChanges && currentFile) {
+				await saveCurrentFile(true);
+			}
+
 			const newFile = await databaseService.saveFile('Untitled', '', $auth.user.$id) as AppwriteDocument;
 			currentFile = newFile;
 			content = '';
+			hasUnsavedChanges = false;
 			// Reset history when creating new file
 			contentHistory = [];
 			historyIndex = -1;
@@ -602,6 +595,13 @@
 			files = fetchedFiles.sort((a, b) => 
 				new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
 			);
+			
+			// Load the most recently updated file if we have files and no current file loaded
+			const mostRecentFile = files[0];
+			if (mostRecentFile && !currentFile) {
+				await loadFile(mostRecentFile);
+			}
+			
 		} catch (err) {
 			error = 'Failed to load files';
 			console.error('Error loading files:', err);
@@ -658,16 +658,39 @@
 	/** Current file being edited */
 	let currentFile: AppwriteDocument | null = null;
 	let isSidebarOpen = false;
-	let autoSaveTimeout: ReturnType<typeof setTimeout>;
+	let autoSaveTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	// Modify the auto-save reactive statement
 	$: if (content && currentFile) {
-		clearTimeout(autoSaveTimeout);
-		autoSaveTimeout = setTimeout(() => saveCurrentFile(false), 1000);
+		if (autoSaveTimeout) {
+			clearTimeout(autoSaveTimeout);
+		}
+		hasUnsavedChanges = true;
+		// Still update files array optimistically for UI
+		const fileToUpdate = currentFile;
+		files = files.map(file => 
+			file.$id === fileToUpdate.$id 
+				? { ...file, title: fileToUpdate.title, content }
+				: file
+		);
 	}
 
 	onMount(() => {
+		const handleBeforeUnload = async (e: BeforeUnloadEvent) => {
+			if (hasUnsavedChanges && currentFile) {
+				// Show browser "unsaved changes" dialog
+				e.preventDefault();
+				e.returnValue = '';
+				
+				// Try to save
+				await saveCurrentFile(true);
+			}
+		};
+
+		window.addEventListener('beforeunload', handleBeforeUnload);
+
 		return () => {
+			window.removeEventListener('beforeunload', handleBeforeUnload);
 			if (autoSaveTimeout) {
 				clearTimeout(autoSaveTimeout);
 			}
@@ -684,8 +707,14 @@
 
 	const loadFile = async (file: AppwriteDocument) => {
 		try {
+			// Save current file if there are unsaved changes
+			if (hasUnsavedChanges && currentFile) {
+				await saveCurrentFile(true);
+			}
+			
 			currentFile = file;
 			content = file.content;
+			hasUnsavedChanges = false;
 			// Reset history when loading new file
 			contentHistory = [];
 			historyIndex = -1;
@@ -695,6 +724,9 @@
 			errorMessage = 'Failed to load file';
 		}
 	};
+
+	let isProfileMenuOpen = false;
+	let isHelpModalOpen = false;
 </script>
 
 <svelte:document />
@@ -843,17 +875,54 @@
 					</div>
 
 					<!-- User info and logout -->
-					{#if $auth.user}
-						<div class="flex items-center space-x-4 text-gray-300">
-							<span>{$auth.user.name}</span>
-							<button 
-								class="button"
-								on:click={handleLogout}
-							>
-								Sign out
-							</button>
-						</div>
-					{/if}
+					<div class="relative">
+						<button 
+							class="button p-2 h-8 w-8 rounded-full bg-gray-700 flex items-center justify-center"
+							on:click={() => isProfileMenuOpen = !isProfileMenuOpen}
+							title={$auth.user?.name}
+						>
+							{#if $auth.user?.name}
+								<span class="text-sm font-medium">
+									{$auth.user.name.charAt(0).toUpperCase()}
+								</span>
+							{/if}
+						</button>
+
+						{#if isProfileMenuOpen}
+							<div class="absolute right-0 mt-2 w-56 bg-gray-800 rounded-lg shadow-lg py-1 z-50">
+								<!-- User Info -->
+								<div class="px-4 py-2 border-b border-gray-700">
+									<p class="text-sm font-medium text-gray-200">{$auth.user?.name}</p>
+									<p class="text-xs text-gray-400">{$auth.user?.email}</p>
+								</div>
+
+								<!-- Help Button -->
+								<button
+									class="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center"
+									on:click={() => {
+										isHelpModalOpen = true;
+										isProfileMenuOpen = false;
+									}}
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+									</svg>
+									Keyboard Shortcuts
+								</button>
+
+								<!-- Sign Out Button -->
+								<button
+									class="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-gray-700 flex items-center border-t border-gray-700"
+									on:click={handleLogout}
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+									</svg>
+									Sign Out
+								</button>
+							</div>
+						{/if}
+					</div>
 				</div>
 			</div>
 
@@ -1223,6 +1292,67 @@
 			</div>
 		</main>
 	</div>
+
+	<!-- Add Help Modal -->
+	{#if isHelpModalOpen}
+		<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+			<div class="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+				<div class="flex justify-between items-center p-4 border-b border-gray-700">
+					<h2 class="text-lg font-semibold text-gray-100">Keyboard Shortcuts</h2>
+					<button 
+						class="text-gray-400 hover:text-gray-200"
+						on:click={() => isHelpModalOpen = false}
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+				<div class="p-4 space-y-4">
+					<div class="grid grid-cols-2 gap-4">
+						<div class="space-y-2">
+							<h3 class="font-medium text-gray-200">Text Formatting</h3>
+							<div class="space-y-1 text-sm">
+								<div class="flex justify-between">
+									<span class="text-gray-400">Bold</span>
+									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + B</kbd>
+								</div>
+								<div class="flex justify-between">
+									<span class="text-gray-400">Italic</span>
+									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + I</kbd>
+								</div>
+								<div class="flex justify-between">
+									<span class="text-gray-400">Underline</span>
+									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + U</kbd>
+								</div>
+								<div class="flex justify-between">
+									<span class="text-gray-400">Link</span>
+									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + K</kbd>
+								</div>
+							</div>
+						</div>
+						<div class="space-y-2">
+							<h3 class="font-medium text-gray-200">General</h3>
+							<div class="space-y-1 text-sm">
+								<div class="flex justify-between">
+									<span class="text-gray-400">Save</span>
+									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + S</kbd>
+								</div>
+								<div class="flex justify-between">
+									<span class="text-gray-400">Toggle Focus Mode</span>
+									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + M</kbd>
+								</div>
+								<div class="flex justify-between">
+									<span class="text-gray-400">Toggle Sidebar</span>
+									<kbd class="px-2 py-1 bg-gray-700 rounded text-xs">Ctrl/⌘ + \</kbd>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	{/if}
 {/if}
 
 <style>
@@ -1279,7 +1409,8 @@
 		if (!(target instanceof Element) || !target.closest('.relative')) {
 			showTextStyleMenu = false;
 			showInsertMenu = false;
+			isProfileMenuOpen = false;
 		}
 	}}
-	class:dropdown-open={showTextStyleMenu || showInsertMenu}
+	class:dropdown-open={showTextStyleMenu || showInsertMenu || isProfileMenuOpen}
 />
