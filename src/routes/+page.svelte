@@ -667,10 +667,10 @@
 							}
 						} catch {
 							// Not a JSON message, handle as normal content update
-							if (newContent !== content) {
-								content = newContent;
+						if (newContent !== content) {
+							content = newContent;
 								hasUnsavedChanges = true;
-							}
+						}
 						}
 					}
 				});
@@ -781,7 +781,7 @@
 			clearTimeout(autoSaveTimeout);
 		}
 		hasUnsavedChanges = true;
-		
+
 		// Save content through collaboration
 		currentCollaboration.saveContent(content).catch(error => {
 			console.error('Error saving content through collaboration:', error);

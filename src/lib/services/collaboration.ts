@@ -1,8 +1,6 @@
 // src/lib/services/collaboration.ts
-import { Databases, Client, ID, Query } from 'appwrite';
-import type { RealtimeResponseEvent } from 'appwrite';
-import { auth } from '../stores/auth';
-import type { Models } from 'appwrite';
+import { Databases, Client } from 'appwrite';
+import type { RealtimeResponseEvent, Models } from 'appwrite';
 
 const APPWRITE_ENDPOINT = import.meta.env.VITE_APPWRITE_ENDPOINT;
 const APPWRITE_PROJECT_ID = import.meta.env.VITE_APPWRITE_PROJECT_ID;
@@ -35,7 +33,7 @@ let databaseUpdateTimeout: ReturnType<typeof setTimeout> | null = null;
 const activeSubscriptions = new Map<string, () => void>();
 
 export const initializeCollaboration = async (options: CollaborationOptions) => {
-    const { documentId, userId, userName, initialContent, onContentChange } = options;
+    const { documentId, userId, initialContent, onContentChange } = options;
     console.log("Initializing collaboration for document:", documentId);
 
     // Clean up any existing subscription for this document
@@ -52,7 +50,7 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
     };
 
     // Store document metadata
-    let documentMetadata: DocumentResponse | null = null;
+    // let documentMetadata: DocumentResponse | null = null;
 
     try {
         const doc = await databases.getDocument(
@@ -61,7 +59,7 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
             documentId
         ) as DocumentResponse;
         
-        documentMetadata = doc;
+        // documentMetadata = doc;
 
         if (doc.content) {
             latestState.content = doc.content;
