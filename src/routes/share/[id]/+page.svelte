@@ -1,8 +1,25 @@
 <!-- src/routes/share/[id]/+page.svelte -->
 <script lang="ts">
     import type { PageData } from './$types';
+    import type { SharedDocument } from '$lib/services/database';
     
-    export let data: PageData;
+    interface CollaboratorProfile {
+        id: string;
+        name: string;
+        email: string;
+    }
+
+    interface DocumentWithOwner extends SharedDocument {
+        owner: CollaboratorProfile;
+        collaboratorProfiles: CollaboratorProfile[];
+    }
+
+    interface PageDataWithDoc extends PageData {
+        document: DocumentWithOwner;
+        currentUser: CollaboratorProfile;
+    }
+    
+    export let data: PageDataWithDoc;
     
     $: ({ document, currentUser } = data);
 </script>
@@ -27,7 +44,7 @@
         <div>
             <h2 class="text-lg font-semibold mb-2">Collaborators</h2>
             <div class="space-y-2">
-                {#each document.collaborators as collaborator}
+                {#each document.collaboratorProfiles as collaborator}
                     <div class="flex items-center space-x-2 p-2 bg-gray-50 rounded">
                         <div class="flex-1">
                             <p class="font-medium">{collaborator.name}</p>

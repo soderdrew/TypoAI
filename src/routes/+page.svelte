@@ -694,6 +694,11 @@
 	};
 
 	onMount(async () => {
+		// Set initial sidebar state from localStorage
+		if (browser) {
+			isSidebarOpen = localStorage.getItem('sidebarOpen') !== 'false';
+		}
+
 		const saved = localStorage.getItem("preferences");
 		if (saved) {
 			preferences = JSON.parse(saved);
@@ -762,11 +767,11 @@
 
 	/** Current file being edited */
 	let currentFile: AppwriteDocument | null = null;
-	let isSidebarOpen = localStorage.getItem('sidebarOpen') !== 'false'; // Default to true
+	let isSidebarOpen = false;
 	let autoSaveTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	// Watch sidebar state changes and save to localStorage
-	$: {
+	$: if (browser) {
 		localStorage.setItem('sidebarOpen', isSidebarOpen.toString());
 	}
 
@@ -1182,7 +1187,6 @@
 			aria-label="Markdown Editor"
 			on:drop={dropFile}
 			on:dragover|preventDefault
-			tabindex="0"
 		>
 			<!-- Editor pane -->
 			<div
@@ -1591,16 +1595,16 @@
 	{#if isShareModalOpen && currentFile}
 		<div 
 			class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
-			on:mousedown|stopPropagation
-			on:keydown|stopPropagation
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="share-modal-title"
 		>
 			<div 
 				class="bg-gray-800 rounded-lg max-w-2xl w-full"
-				on:mousedown|stopPropagation
-				on:keydown|stopPropagation
+				role="document"
 			>
 				<div class="flex justify-between items-center p-4 border-b border-gray-700">
-					<h2 class="text-lg font-semibold text-gray-100">Share Document</h2>
+					<h2 id="share-modal-title" class="text-lg font-semibold text-gray-100">Share Document</h2>
 					<button 
 						class="text-gray-400 hover:text-gray-200"
 						on:click={() => isShareModalOpen = false}
@@ -1613,9 +1617,10 @@
 				<div class="p-4">
 					<!-- Add Collaborator Form -->
 					<div class="mb-6">
-						<label class="block text-sm font-medium text-gray-300 mb-2">Add People</label>
+						<label for="collaborator-email" class="block text-sm font-medium text-gray-300 mb-2">Add People</label>
 						<div class="flex space-x-2">
 							<input 
+								id="collaborator-email"
 								type="email" 
 								placeholder="Enter email address"
 								bind:value={newCollaboratorEmail}
@@ -1734,11 +1739,28 @@
 
 <style>
 	.button {
-		@apply p-2 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors duration-150 flex items-center;
+		padding: 0.5rem;
+		color: rgb(209 213 219);
+		border-radius: 0.5rem;
+		transition-property: color, background-color;
+		transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+		transition-duration: 150ms;
+		display: flex;
+		align-items: center;
+	}
+
+	.button:hover {
+		color: white;
+		background-color: rgb(55 65 81);
 	}
 
 	:global(.dark) .button {
-		@apply text-gray-300 hover:text-white hover:bg-gray-700;
+		color: rgb(209 213 219);
+	}
+
+	:global(.dark) .button:hover {
+		color: white;
+		background-color: rgb(55 65 81);
 	}
 
 	:global(drab-editor) {
@@ -1746,37 +1768,49 @@
 	}
 
 	:global(.files-sidebar) {
-		@apply bg-gray-900 border-r border-gray-700;
+		background-color: rgb(17 24 39);
+		border-right: 1px solid rgb(55 65 81);
 	}
 
 	:global(.files-sidebar .sidebar-header) {
-		@apply bg-gray-900 border-b border-gray-700;
+		background-color: rgb(17 24 39);
+		border-bottom: 1px solid rgb(55 65 81);
 	}
 
 	:global(.files-sidebar .file-item) {
-		@apply text-gray-300 hover:text-white hover:bg-gray-700;
+		color: rgb(209 213 219);
+	}
+
+	:global(.files-sidebar .file-item:hover) {
+		color: white;
+		background-color: rgb(55 65 81);
 	}
 
 	:global(.files-sidebar .file-item.active) {
-		@apply bg-gray-700 text-white;
+		background-color: rgb(55 65 81);
+		color: white;
 	}
 
 	textarea {
-		@apply flex-1 min-h-0;
+		flex: 1;
+		min-height: 0;
 	}
 
 	/* Click outside to close dropdowns */
 	:global(body) {
-		@apply relative;
+		position: relative;
 	}
 
 	:global(body::before) {
 		content: '';
-		@apply fixed inset-0 z-40 hidden;
+		position: fixed;
+		inset: 0;
+		z-index: 40;
+		display: none;
 	}
 
 	:global(body.dropdown-open::before) {
-		@apply block;
+		display: block;
 	}
 </style>
 
