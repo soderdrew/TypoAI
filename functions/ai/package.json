@@ -1,0 +1,19 @@
+{
+  "name": "typo-ai-function",
+  "version": "1.0.0",
+  "description": "AI operations function for TypoAI",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "node-appwrite": "^11.1.0",
+    "openai": "^4.24.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/node": "^20.10.6"
+  }
+}

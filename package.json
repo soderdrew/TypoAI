@@ -43,6 +43,7 @@
 		"axios": "^1.7.9",
 		"caniuse-lite": "^1.0.30001699",
 		"mammoth": "^1.9.0",
+		"node-appwrite": "^15.0.0",
 		"openai": "^4.85.2",
 		"pdfjs-dist": "^4.10.38",
 		"showdown": "^2.1.0",

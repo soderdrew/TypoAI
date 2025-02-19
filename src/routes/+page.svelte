@@ -26,6 +26,8 @@
 	import TextEditor from '$lib/components/TextEditor.svelte';
 	import Header from '$lib/components/Header.svelte';
 
+	import { AIService } from '$lib/services/ai';
+
 	inject({ mode: dev ? "development" : "production" });
 
 	let content = "";
@@ -293,10 +295,10 @@
 								}
 							}
 						} catch {
-							if (newContent !== content) {
-								content = newContent;
+						if (newContent !== content) {
+							content = newContent;
 								hasUnsavedChanges = true;
-							}
+						}
 						}
 					}
 				});
@@ -352,6 +354,28 @@
 		);
 	}
 
+	const aiService = new AIService();
+
+	const aiFormat = async () => {
+		console.log("AI Format clicked");
+		try {
+			const result = await aiService.formatMarkdown(content);
+			if (result.error) {
+				errorMessage = result.error;
+				return;
+			}
+			content = result.content;
+			hasUnsavedChanges = true;
+		} catch (error) {
+			errorMessage = `AI formatting failed: ${error}`;
+		}
+	};
+
+	const grammarCheck = async () => {
+		// TODO: Implement grammar checking
+		console.log("Grammar check clicked");
+	};
+
 	onMount(() => {
 		if (browser) {
 			isSidebarOpen = localStorage.getItem('sidebarOpen') !== 'false';
@@ -378,7 +402,7 @@
 					const doc = await databaseService.getDocument(sharedDocId) as AppwriteDocument;
 					await loadFile(doc);
 					window.history.replaceState({}, '', '/');
-				} catch (error) {
+		} catch (error) {
 					console.error('Error loading shared document:', error);
 					errorMessage = 'Failed to load shared document';
 				}
@@ -407,7 +431,7 @@
 	});
 
 	onDestroy(() => {
-		if (currentCollaboration) {
+			if (currentCollaboration) {
 			currentCollaboration.cleanup();
 		}
 	});
@@ -472,6 +496,8 @@
 			onOpen={open}
 			onSaveAs={saveAs}
 			onFormat={fmt}
+			onAIFormat={aiFormat}
+			onGrammarCheck={grammarCheck}
 			onShare={handleShareClick}
 			onLogout={handleLogout}
 			onClearError={clearError}
@@ -503,7 +529,7 @@
 				bind:preferences
 			/>
 		</main>
-	</div>
+		</div>
 {/if}
 
 <style>

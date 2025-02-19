@@ -150,5 +150,25 @@
                 }
             ]
         }
+    ],
+    "functions": [
+        {
+            "$id": "ai-operations",
+            "name": "AI Operations",
+            "runtime": "node-18.0",
+            "execute": ["users"],
+            "events": [],
+            "schedule": "",
+            "timeout": 30,
+            "enabled": true,
+            "entrypoint": "dist/index.js",
+            "commands": "npm install && npm run build",
+            "ignore": [
+                "node_modules",
+                ".npm",
+                "src"
+            ],
+            "path": "functions/ai"
+        }
     ]
 }

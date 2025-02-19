@@ -1,14 +1,10 @@
-import axios from 'axios';
+import { Client, Functions } from 'appwrite';
 
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
+const client = new Client()
+    .setEndpoint(import.meta.env.VITE_APPWRITE_ENDPOINT)
+    .setProject(import.meta.env.VITE_APPWRITE_PROJECT_ID);
 
-const openaiApi = axios.create({
-    baseURL: 'https://api.openai.com/v1',
-    headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
-    }
-});
+const functions = new Functions(client);
 
 export interface AISuggestion {
     original: string;
@@ -19,34 +15,50 @@ export interface AISuggestion {
     endIndex: number;
 }
 
-export const aiService = {
-    async analyzeText(content: string): Promise<AISuggestion[]> {
+export class AIService {
+    async formatMarkdown(content: string): Promise<{ content: string; error: string | null }> {
         try {
-            const response = await openaiApi.post('/chat/completions', {
-                model: "gpt-4",
-                messages: [{
-                    role: "user", 
-                    content: `Analyze the following text and provide suggestions for improvements in spelling, grammar, style, and clarity. For each suggestion, include the start and end indices of the text to be replaced. Format your response as a JSON array of objects with the following structure:
-                    {
-                        "original": "text with issue",
-                        "suggestion": "improved text",
-                        "type": "spelling|grammar|style|clarity",
-                        "explanation": "brief explanation of the improvement",
-                        "startIndex": number,
-                        "endIndex": number
-                    }
-                    
-                    Text to analyze: ${content}`
-                }],
-                temperature: 0.7,
-                max_tokens: 1000
-            });
+            const execution = await functions.createExecution(
+                'ai-operations',
+                JSON.stringify({
+                    type: 'format',
+                    content
+                })
+            );
 
-            const suggestions = JSON.parse(response.data.choices[0].message.content);
-            return suggestions as AISuggestion[];
+            const result = JSON.parse(execution.responseBody);
+            return {
+                content: result.content || content,
+                error: result.error
+            };
         } catch (error) {
-            console.error("Error analyzing text:", error);
-            throw error;
+            return {
+                content,
+                error: `Error formatting content: ${error}`
+            };
         }
     }
-}; 
+
+    async analyzeText(content: string): Promise<{ suggestions: AISuggestion[]; error: string | null }> {
+        try {
+            const execution = await functions.createExecution(
+                'ai-operations',
+                JSON.stringify({
+                    type: 'grammar',
+                    content
+                })
+            );
+
+            const result = JSON.parse(execution.responseBody);
+            return {
+                suggestions: result.suggestions || [],
+                error: result.error
+            };
+        } catch (error) {
+            return {
+                suggestions: [],
+                error: `Error analyzing text: ${error}`
+            };
+        }
+    }
+} 
