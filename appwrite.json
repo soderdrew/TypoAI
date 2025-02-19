@@ -71,10 +71,12 @@
                     "$id": "documents",
                     "name": "Shared Documents",
                     "$permissions": [
-                        "create(\"user:{{user.$id}}\")",
-                        "read(\"user:{{user.$id}}\")",
-                        "update(\"user:{{user.$id}}\")",
-                        "delete(\"user:{{user.$id}}\")"
+                        "create(\"user:*\")",
+                        "read(\"user:{{document.ownerId}}\")",
+                        "read(\"user:{{document.collaborators}}\")",
+                        "update(\"user:{{document.ownerId}}\")",
+                        "update(\"user:{{document.collaborators}}\")",
+                        "delete(\"user:{{document.ownerId}}\")"
                     ],
                     "attributes": [
                         {

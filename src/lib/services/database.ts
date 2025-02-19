@@ -22,6 +22,7 @@ export interface UserProfile {
 }
 
 export interface SharedDocument {
+    $id: string;
     id: string;
     title: string;
     content: string;
@@ -30,6 +31,12 @@ export interface SharedDocument {
     isPublic: boolean;
     createdAt: string;
     updatedAt: string;
+}
+
+export interface CollaboratorProfile {
+    id: string;
+    name: string;
+    email: string;
 }
 
 export const databaseService = {
@@ -181,7 +188,14 @@ export const databaseService = {
             const doc = await databases.getDocument(
                 DATABASE_ID,
                 DOCUMENTS_COLLECTION_ID,
-                documentId
+                documentId,
+                // Add permissions for both owner and collaborators
+                [
+                    Permission.read(Role.user('{{document.ownerId}}')),
+                    Permission.read(Role.user('{{document.collaborators}}')),
+                    Permission.update(Role.user('{{document.ownerId}}')),
+                    Permission.update(Role.user('{{document.collaborators}}'))
+                ]
             );
             return doc as unknown as SharedDocument;
         } catch (error) {
@@ -199,7 +213,7 @@ export const databaseService = {
                 DATABASE_ID,
                 DOCUMENTS_COLLECTION_ID,
                 [
-                    Query.equal('collaborators', [user.$id])
+                    Query.search('collaborators', user.$id)
                 ]
             );
             return docs.documents as unknown as SharedDocument[];
@@ -211,27 +225,48 @@ export const databaseService = {
 
     async addCollaborator(documentId: string, collaboratorId: string): Promise<SharedDocument> {
         try {
-            const doc = await this.getDocument(documentId);
-            if (!doc.collaborators.includes(collaboratorId)) {
-                doc.collaborators.push(collaboratorId);
-                
+            console.log('Adding collaborator:', { documentId, collaboratorId });
+            
+            // First try to get the document
+            let doc;
+            try {
+                doc = await databases.getDocument(
+                    DATABASE_ID,
+                    DOCUMENTS_COLLECTION_ID,
+                    documentId
+                );
+                console.log('Retrieved document:', doc);
+            } catch (error) {
+                console.error('Error getting document:', error);
+                throw error;
+            }
+
+            // Check if collaborator is already added
+            if (doc.collaborators.includes(collaboratorId)) {
+                console.log('Collaborator already exists:', collaboratorId);
+                return doc as unknown as SharedDocument;
+            }
+
+            // Add new collaborator
+            const updatedCollaborators = [...doc.collaborators, collaboratorId];
+            console.log('Updating collaborators:', updatedCollaborators);
+
+            try {
                 // Update document with new collaborator
                 const updatedDoc = await databases.updateDocument(
                     DATABASE_ID,
                     DOCUMENTS_COLLECTION_ID,
                     documentId,
-                    { collaborators: doc.collaborators },
-                    [
-                        Permission.read(Role.user(collaboratorId)),
-                        Permission.write(Role.user(collaboratorId))
-                    ]
+                    { collaborators: updatedCollaborators }
                 );
-                
+                console.log('Document updated successfully:', updatedDoc);
                 return updatedDoc as unknown as SharedDocument;
+            } catch (error) {
+                console.error('Error updating document:', error);
+                throw error;
             }
-            return doc;
         } catch (error) {
-            console.error('Error adding collaborator:', error);
+            console.error('Error in addCollaborator:', error);
             throw error;
         }
     },
@@ -297,6 +332,23 @@ export const databaseService = {
         }
     },
 
+    async getSharedWithMe(userId: string): Promise<SharedDocument[]> {
+        try {
+            const { documents } = await databases.listDocuments(
+                DATABASE_ID,
+                DOCUMENTS_COLLECTION_ID,
+                [
+                    Query.contains('collaborators', [userId]),
+                    Query.notEqual('ownerId', userId)
+                ]
+            );
+            return documents as unknown as SharedDocument[];
+        } catch (error) {
+            console.error('Error getting shared files:', error);
+            throw error;
+        }
+    },
+
     async getFile(fileId: string): Promise<SharedDocument> {
         try {
             const doc = await databases.getDocument(
@@ -339,6 +391,62 @@ export const databaseService = {
             );
         } catch (error) {
             console.error('Error deleting file:', error);
+            throw error;
+        }
+    },
+
+    async getCollaboratorProfiles(collaboratorIds: string[]): Promise<CollaboratorProfile[]> {
+        try {
+            const profiles = await Promise.all(
+                collaboratorIds.map(async (id) => {
+                    try {
+                        const profile = await databases.getDocument(
+                            DATABASE_ID,
+                            PROFILES_COLLECTION_ID,
+                            id
+                        );
+                        return {
+                            id,
+                            name: profile.name,
+                            email: profile.email
+                        };
+                    } catch (error) {
+                        return {
+                            id,
+                            name: 'Unknown User',
+                            email: ''
+                        };
+                    }
+                })
+            );
+            return profiles;
+        } catch (error) {
+            console.error('Error getting collaborator profiles:', error);
+            throw error;
+        }
+    },
+
+    async findUserByEmail(email: string): Promise<UserProfile | null> {
+        try {
+            console.log('Finding user by email:', email);
+            
+            const response = await databases.listDocuments(
+                DATABASE_ID,
+                PROFILES_COLLECTION_ID,
+                [Query.equal('email', email)]
+            );
+            
+            console.log('User search response:', response);
+            
+            if (response.documents.length === 0) {
+                console.log('No user found with email:', email);
+                return null;
+            }
+            
+            console.log('Found user:', response.documents[0]);
+            return response.documents[0] as unknown as UserProfile;
+        } catch (error) {
+            console.error('Error finding user by email:', error);
             throw error;
         }
     }

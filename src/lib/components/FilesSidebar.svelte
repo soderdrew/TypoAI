@@ -4,23 +4,24 @@
     import { auth } from '$lib/stores/auth';
     import type { SharedDocument } from '$lib/services/database';
 
-    interface AppwriteDocument extends SharedDocument {
-        $id: string;
-    }
-
     export let isOpen = false;
-    export let onFileSelect: (doc: AppwriteDocument) => void;
+    export let onFileSelect: (doc: SharedDocument) => void;
     export let currentFileId: string | null = null;
-    export let files: AppwriteDocument[] = [];
+    export let files: SharedDocument[] = [];
     export let loading = true;
     export let error: string | null = null;
+
+    let sharedFiles: SharedDocument[] = [];
+    let loadingShared = false;
+    let sharedError: string | null = null;
+    let activeTab: 'my-files' | 'shared' = 'my-files';
 
     async function loadFiles() {
         if (!$auth.user) return;
         
         try {
             loading = true;
-            files = (await databaseService.getAllFiles($auth.user.$id)) as AppwriteDocument[];
+            files = await databaseService.getAllFiles($auth.user.$id);
         } catch (err) {
             error = 'Failed to load files';
             console.error('Error loading files:', err);
@@ -48,61 +49,93 @@
         }
     }
 
+    async function loadSharedFiles() {
+        if (!$auth.user) return;
+        
+        try {
+            loadingShared = true;
+            sharedFiles = await databaseService.getSharedWithMe($auth.user.$id);
+        } catch (err) {
+            console.error('Error loading shared files:', err);
+            sharedError = 'Failed to load shared files';
+        } finally {
+            loadingShared = false;
+        }
+    }
+
     onMount(() => {
         loadFiles();
+        loadSharedFiles();
     });
 
     $: if ($auth.user) {
         loadFiles();
+        loadSharedFiles();
     }
 </script>
 
-<div class="files-sidebar {isOpen ? 'open' : ''}" class:hidden={!isOpen}>
-    <div class="sidebar-header">
-        <h2 class="text-lg font-semibold text-gray-50">Your Files</h2>
+<div class="fixed top-16 left-0 bottom-0 w-64 bg-gray-900 border-r border-gray-700 transition-transform duration-200 {isOpen ? 'translate-x-0' : '-translate-x-full'}">
+    <!-- Tabs -->
+    <div class="flex border-b border-gray-700">
+        <button 
+            class="flex-1 px-4 py-2 text-sm font-medium {activeTab === 'my-files' ? 'text-white border-b-2 border-blue-500' : 'text-gray-400 hover:text-white'}"
+            on:click={() => activeTab = 'my-files'}
+        >
+            My Files
+        </button>
+        <button 
+            class="flex-1 px-4 py-2 text-sm font-medium {activeTab === 'shared' ? 'text-white border-b-2 border-blue-500' : 'text-gray-400 hover:text-white'}"
+            on:click={() => activeTab = 'shared'}
+        >
+            Shared with me
+        </button>
     </div>
-    
-    <div class="files-list">
-        {#if loading}
-            <div class="loading">Loading files...</div>
-        {:else if error}
-            <div class="error">{error}</div>
-        {:else if files.length === 0}
-            <div class="empty-state">No files yet</div>
-        {:else}
-            {#each files as file}
-                <div class="file-item-wrapper group">
-                    <button
-                        class="file-item {currentFileId === file.$id ? 'active' : ''}"
-                        on:click={() => onFileSelect(file)}
-                    >
-                        <span class="file-title">{file.title || 'Untitled'}</span>
-                        <span class="file-date">{new Date(file.updatedAt).toLocaleDateString()}</span>
-                    </button>
-                    <button
-                        class="delete-button opacity-0 group-hover:opacity-100"
-                        on:click={(e) => deleteFile(e, file.$id)}
-                        title="Delete file"
-                    >
-                        <svg 
-                            xmlns="http://www.w3.org/2000/svg" 
-                            class="h-4 w-4" 
-                            fill="none" 
-                            viewBox="0 0 24 24" 
-                            stroke="currentColor"
+
+    {#if activeTab === 'my-files'}
+        <!-- My Files List -->
+        <div class="p-4">
+            {#if loading}
+                <div class="text-gray-400 text-sm">Loading...</div>
+            {:else if error}
+                <div class="text-red-400 text-sm">{error}</div>
+            {:else if files.length === 0}
+                <div class="text-gray-400 text-sm">No files yet</div>
+            {:else}
+                <div class="space-y-2">
+                    {#each files as file}
+                        <button
+                            class="w-full text-left p-2 rounded text-sm {currentFileId === file.$id ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'}"
+                            on:click={() => onFileSelect(file)}
                         >
-                            <path 
-                                stroke-linecap="round" 
-                                stroke-linejoin="round" 
-                                stroke-width="2" 
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" 
-                            />
-                        </svg>
-                    </button>
+                            {file.title || 'Untitled'}
+                        </button>
+                    {/each}
                 </div>
-            {/each}
-        {/if}
-    </div>
+            {/if}
+        </div>
+    {:else}
+        <!-- Shared Files List -->
+        <div class="p-4">
+            {#if loadingShared}
+                <div class="text-gray-400 text-sm">Loading shared files...</div>
+            {:else if sharedError}
+                <div class="text-red-400 text-sm">{sharedError}</div>
+            {:else if sharedFiles.length === 0}
+                <div class="text-gray-400 text-sm">No shared files</div>
+            {:else}
+                <div class="space-y-2">
+                    {#each sharedFiles as file}
+                        <button
+                            class="w-full text-left p-2 rounded text-sm {currentFileId === file.$id ? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'}"
+                            on:click={() => onFileSelect(file)}
+                        >
+                            {file.title || 'Untitled'}
+                        </button>
+                    {/each}
+                </div>
+            {/if}
+        </div>
+    {/if}
 </div>
 
 <style>

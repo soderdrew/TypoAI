@@ -2,7 +2,7 @@
 	import "../app.postcss";
 
 	import { dev, browser } from "$app/environment";
-	import { afterUpdate, onMount, tick } from "svelte";
+	import { afterUpdate, onMount, onDestroy } from "svelte";
 	import { convertDocumentToMarkdown } from '$lib/utilities/convertDocument';
 
 	import { processMarkdown } from "robino/util/md";
@@ -37,16 +37,20 @@
 	import CopyComplete from "$lib/components/svg/CopyComplete.svelte";
 	import CodeBracket from "$lib/components/svg/CodeBracket.svelte";
 	import Focus from "$lib/components/svg/Focus.svelte";
+	import Share from '$lib/components/svg/Share.svelte';
 
 	import { auth } from '$lib/stores/auth';
 	import { authService } from '$lib/services/appwrite';
-	import Auth from '$lib/components/Auth.svelte';
+	import { databaseService } from '$lib/services/database';
+	import type { SharedDocument, CollaboratorProfile } from '$lib/services/database';
+	import { initializeCollaboration } from '$lib/services/collaboration';
 
+	import { getBaseURL } from '$lib/utilities/url';
+	import { writable, get } from 'svelte/store';
+
+	import Auth from '$lib/components/Auth.svelte';
 	import FilesSidebar from '$lib/components/FilesSidebar.svelte';
 	import Files from '$lib/components/svg/Files.svelte';
-	import { databaseService } from '$lib/services/database';
-	import type { SharedDocument } from '$lib/services/database';
-	import { initializeCollaboration } from '$lib/services/collaboration';
 
 	inject({ mode: dev ? "development" : "production" });
 
@@ -392,7 +396,6 @@
 	const fmt = async () => {
 		const sel = textArea.selectionStart;
 		content = await formatMd(content);
-		await tick();
 		textArea.setSelectionRange(sel, sel);
 	};
 
@@ -574,6 +577,8 @@
 			const newFile = await databaseService.saveFile('Untitled', '', $auth.user.$id) as AppwriteDocument;
 			currentFile = newFile;
 			content = '';
+			$documentId = newFile.$id;
+			shareLink.set(generateShareLink(newFile.$id));
 			hasUnsavedChanges = false;
 			// Reset history when creating new file
 			contentHistory = [];
@@ -617,30 +622,30 @@
 
 	let currentCollaboration: { 
 		saveContent: (content: string) => Promise<void>;
-		updatePresence: (cursor: { start: number; end: number; } | null) => Promise<void>;
 		cleanup: () => void;
 		getContent: () => string;
-		getPresence: () => Record<string, any>;
 	} | null = null;
-
-	// Add presence state
-	let userPresence: Record<string, any> = {};
 
 	const loadFile = async (file: AppwriteDocument) => {
 		try {
-			// Cleanup previous collaboration
-			if (currentCollaboration) {
-				currentCollaboration.cleanup();
-			}
-
 			// Save current file if there are unsaved changes
 			if (hasUnsavedChanges && currentFile) {
 				await saveCurrentFile(true);
 			}
+
+			// Cleanup previous collaboration
+			if (currentCollaboration) {
+				// Save any pending changes before cleanup
+				if (content !== currentCollaboration.getContent()) {
+					await currentCollaboration.saveContent(content);
+				}
+				currentCollaboration.cleanup();
+				currentCollaboration = null;
+			}
 			
 			currentFile = file;
-			content = file.content;
-			hasUnsavedChanges = false;
+			$documentId = file.$id;
+			shareLink.set(generateShareLink(file.$id));
 			
 			// Initialize collaboration when loading a file
 			if ($auth.user) {
@@ -653,13 +658,21 @@
 						// Only update content if it's different to prevent loops
 						if (newContent !== content) {
 							content = newContent;
+							hasUnsavedChanges = true;
 						}
 					},
-					onPresenceChange: (presence) => {
-						userPresence = presence;
+					onPresenceChange: () => {
+						// No-op - presence functionality disabled
 					}
 				});
+				
+				// Set content after collaboration is initialized
+				content = currentCollaboration.getContent();
+			} else {
+				content = file.content;
 			}
+			
+			hasUnsavedChanges = false;
 			
 			// Reset history when loading new file
 			contentHistory = [];
@@ -668,16 +681,6 @@
 		} catch (error) {
 			console.error('Error loading file:', error);
 			errorMessage = 'Failed to load file';
-		}
-	};
-
-	// Handle cursor position changes
-	const handleCursorChange = () => {
-		if (currentCollaboration && textArea) {
-			currentCollaboration.updatePresence({
-				start: textArea.selectionStart,
-				end: textArea.selectionEnd
-			});
 		}
 	};
 
@@ -694,12 +697,34 @@
 		// Check for existing session
 		await authService.checkSession();
 		
+		// Check for shared document in URL
+		const urlParams = new URLSearchParams(window.location.search);
+		const sharedDocId = urlParams.get('doc');
+		
 		// Initial files load
 		await loadFiles();
+
+		// If there's a shared document ID, load it
+		if (sharedDocId) {
+			try {
+				const doc = await databaseService.getDocument(sharedDocId) as AppwriteDocument;
+				await loadFile(doc);
+				// Clean up the URL
+				window.history.replaceState({}, '', '/');
+			} catch (error) {
+				console.error('Error loading shared document:', error);
+				errorMessage = 'Failed to load shared document';
+			}
+		}
+	});
+
+	onDestroy(() => {
+		if (currentCollaboration) {
+			currentCollaboration.cleanup();
+		}
 	});
 
 	afterUpdate(async () => {
-		await tick();
 		codeEval();
 	});
 
@@ -732,24 +757,17 @@
 	let autoSaveTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	// Modify the auto-save reactive statement
-	$: if (content && currentFile) {
+	$: if (content && currentFile && currentCollaboration) {
 		if (autoSaveTimeout) {
 			clearTimeout(autoSaveTimeout);
 		}
 		hasUnsavedChanges = true;
 		
-		// Update files array optimistically for UI
-		const fileToUpdate = currentFile;
-		files = files.map(file => 
-			file.$id === fileToUpdate.$id 
-				? { ...file, title: fileToUpdate.title, content }
-				: file
-		);
-
 		// Save content through collaboration
-		if (currentCollaboration) {
-			currentCollaboration.saveContent(content);
-		}
+		currentCollaboration.saveContent(content).catch(error => {
+			console.error('Error saving content through collaboration:', error);
+			errorMessage = 'Failed to save changes';
+		});
 	}
 
 	onMount(() => {
@@ -788,23 +806,84 @@
 	let isProfileMenuOpen = false;
 	let isHelpModalOpen = false;
 
-	// Add helper function to calculate cursor position
-	function calculateCursorPosition(index: number) {
-		if (!textArea) return { top: 0, left: 0 };
+	export const shareLink = writable("");
+	export const documentId = writable('');
 
-		const text = textArea.value.substring(0, index);
-		const lines = text.split('\n');
-		const lineNumber = lines.length - 1;
-		const charPosition = lines[lines.length - 1].length;
+	function generateShareLink(docId: string): string {
+		const baseUrl = getBaseURL();
+		return `${baseUrl}/share/${docId}`;
+	}
 
-		// Calculate position based on font metrics
-		const lineHeight = 20; // Adjust based on your font size
-		const charWidth = 8;   // Adjust based on your font
+	let isShareModalOpen = false;
 
-		return {
-			top: lineNumber * lineHeight + 24, // Add padding offset
-			left: charPosition * charWidth + 24 // Add padding offset
-		};
+	let collaboratorProfiles: CollaboratorProfile[] = [];
+
+	const loadCollaboratorProfiles = async () => {
+		if (!currentFile) return;
+		try {
+			collaboratorProfiles = await databaseService.getCollaboratorProfiles(currentFile.collaborators);
+		} catch (error) {
+			console.error('Error loading collaborator profiles:', error);
+			errorMessage = 'Failed to load collaborators';
+		}
+	};
+
+	const handleShareClick = async () => {
+		const docId = get(documentId);
+		if (!docId || !currentFile) {
+			errorMessage = 'No document selected to share';
+			return;
+		}
+		
+		// Load collaborator profiles before opening modal
+		await loadCollaboratorProfiles();
+		isShareModalOpen = true;
+	};
+
+	let newCollaboratorEmail = '';
+	let addCollaboratorError: string | null = null;
+
+	async function handleAddCollaborator() {
+		if (!currentFile || !$auth.user) return;
+		
+		try {
+			addCollaboratorError = null;
+			
+			// Use the databaseService to find the user by email
+			const userProfile = await databaseService.findUserByEmail(newCollaboratorEmail);
+			
+			if (!userProfile) {
+				throw new Error('User not found');
+			}
+			
+			// Add the user as a collaborator
+			await databaseService.addCollaborator(currentFile.$id, userProfile.userId);
+			
+			// Immediately refresh collaborator profiles
+			await loadCollaboratorProfiles();
+			
+			// Clear the input
+			newCollaboratorEmail = '';
+			
+		} catch (error) {
+			console.error('Error adding collaborator:', error);
+			addCollaboratorError = 'Failed to add collaborator. Make sure the email is correct and the user exists.';
+		}
+	}
+
+	async function handleRemoveCollaborator(collaboratorId: string) {
+		if (!currentFile || !$auth.user) return;
+		
+		if (!confirm('Are you sure you want to remove this collaborator?')) return;
+		
+		try {
+			await databaseService.removeCollaborator(currentFile.$id, collaboratorId);
+			// Refresh collaborator profiles
+			await loadCollaboratorProfiles();
+		} catch (error) {
+			console.error('Error removing collaborator:', error);
+			errorMessage = 'Failed to remove collaborator';
+		}
 	}
 </script>
 
@@ -917,6 +996,15 @@
 								<span class="hidden lg:inline">Copy</span>
 							</button>
 						</drab-copy>
+
+						<button
+							title="Get sharable link"
+							class="button"
+							on:click={handleShareClick}
+						>
+							<Share />
+							<span class="hidden lg:inline">Share</span>
+						</button>
 
 						<drab-copy value={html} class="contents">
 							<button data-trigger title="Copy HTML" class="button">
@@ -1042,31 +1130,7 @@
 						class="flex-1 resize-none appearance-none overflow-y-auto p-6 font-mono text-sm transition placeholder:text-gray-400 focus:outline-none text-gray-50 bg-gray-950"
 						placeholder="# Title"
 						bind:value={content}
-						on:select={handleCursorChange}
-						on:click={handleCursorChange}
-						on:keyup={handleCursorChange}
 					></textarea>
-
-					<!-- Add cursor indicators for other users -->
-					{#if userPresence && Object.keys(userPresence).length > 0}
-						<div class="absolute inset-0 pointer-events-none">
-							{#each Object.entries(userPresence) as [userId, user]}
-								{#if userId !== $auth.user?.$id && user.cursor}
-									<div 
-										class="absolute h-5 w-0.5 bg-blue-500 transition-all duration-100"
-										style="
-											top: {calculateCursorPosition(user.cursor.start).top}px;
-											left: {calculateCursorPosition(user.cursor.start).left}px;
-										"
-									>
-										<div class="absolute top-0 left-2 whitespace-nowrap bg-blue-500 text-white text-xs px-2 py-1 rounded">
-											{user.name}
-										</div>
-									</div>
-								{/if}
-							{/each}
-						</div>
-					{/if}
 
 					<!-- Formatting toolbar -->
 					<div class="flex flex-wrap p-3 border-t border-gray-700 bg-gray-900" class:hidden={preferences.focusMode}>
@@ -1451,6 +1515,123 @@
 									<kbd class="px-2 py-1 bg-gray-700 text-white rounded text-xs">Ctrl/⌘ + \</kbd>
 								</div>
 							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Add this before the closing body tag -->
+	{#if isShareModalOpen && currentFile}
+		<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+			<div class="bg-gray-800 rounded-lg max-w-2xl w-full">
+				<div class="flex justify-between items-center p-4 border-b border-gray-700">
+					<h2 class="text-lg font-semibold text-gray-100">Share Document</h2>
+					<button 
+						class="text-gray-400 hover:text-gray-200"
+						on:click={() => isShareModalOpen = false}
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+				<div class="p-4">
+					<!-- Add Collaborator Form -->
+					<div class="mb-6">
+						<label class="block text-sm font-medium text-gray-300 mb-2">Add People</label>
+						<div class="flex space-x-2">
+							<input 
+								type="email" 
+								placeholder="Enter email address"
+								bind:value={newCollaboratorEmail}
+								class="flex-1 bg-gray-700 text-gray-100 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+							/>
+							<button
+								class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+								on:click={handleAddCollaborator}
+								disabled={!newCollaboratorEmail}
+							>
+								Add
+							</button>
+						</div>
+						{#if addCollaboratorError}
+							<p class="mt-2 text-sm text-red-400">{addCollaboratorError}</p>
+						{/if}
+					</div>
+
+					<!-- Collaborators -->
+					<div>
+						<div class="flex justify-between items-center mb-2">
+							<h3 class="text-sm font-medium text-gray-300">People with access</h3>
+							{#if currentFile?.ownerId === $auth.user?.$id}
+								<button 
+									class="text-sm text-blue-400 hover:text-blue-300"
+									on:click={() => {
+										// TODO: Add invite functionality
+									}}
+								>
+									+ Add people
+								</button>
+							{/if}
+						</div>
+						
+						<!-- Owner -->
+						<div class="space-y-2">
+							<div class="flex items-center justify-between p-2 bg-gray-700 rounded-lg">
+								<div class="flex items-center space-x-3">
+									<div class="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center">
+										<span class="text-white font-medium">
+											{currentFile.ownerId === $auth.user?.$id ? 
+												$auth.user.name?.charAt(0).toUpperCase() : 'O'}
+										</span>
+									</div>
+									<div>
+										<p class="text-gray-200 font-medium">
+											{currentFile.ownerId === $auth.user?.$id ? 
+												$auth.user.name : 'Owner'}
+										</p>
+										<p class="text-sm text-gray-400">Owner</p>
+									</div>
+								</div>
+								{#if currentFile.ownerId === $auth.user?.$id}
+									<span class="px-2 py-1 bg-gray-600 text-gray-300 text-sm rounded-lg">You</span>
+								{/if}
+							</div>
+
+							<!-- Collaborators -->
+							{#if currentFile && collaboratorProfiles}
+								{#each collaboratorProfiles.filter(profile => profile.id !== currentFile?.ownerId) as profile}
+									<div class="flex items-center justify-between p-2 bg-gray-700 rounded-lg">
+										<div class="flex items-center space-x-3">
+											<div class="h-8 w-8 rounded-full bg-gray-600 flex items-center justify-center">
+												<span class="text-white font-medium">{profile.name.charAt(0).toUpperCase()}</span>
+											</div>
+											<div>
+												<p class="text-gray-200 font-medium">{profile.name}</p>
+												<p class="text-sm text-gray-400">{profile.email}</p>
+											</div>
+										</div>
+										<div class="flex items-center space-x-2">
+											{#if profile.id === $auth.user?.$id}
+												<span class="px-2 py-1 bg-gray-600 text-gray-300 text-sm rounded-lg">You</span>
+											{/if}
+											{#if currentFile?.ownerId === $auth.user?.$id && profile.id !== $auth.user?.$id}
+												<button
+													class="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-600 rounded transition-colors"
+													on:click={() => handleRemoveCollaborator(profile.id)}
+													title="Remove collaborator"
+												>
+													<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+														<path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/>
+													</svg>
+												</button>
+											{/if}
+										</div>
+									</div>
+								{/each}
+							{/if}
 						</div>
 					</div>
 				</div>
