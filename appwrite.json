@@ -155,20 +155,22 @@
         {
             "$id": "ai-operations",
             "name": "AI Operations",
-            "runtime": "node-18.0",
-            "execute": ["users"],
+            "runtime": "node-16.0",
+            "execute": ["any"],
             "events": [],
             "schedule": "",
-            "timeout": 30,
+            "timeout": 15,
             "enabled": true,
-            "entrypoint": "dist/index.js",
-            "commands": "npm install && npm run build",
+            "logging": true,
+            "entrypoint": "src/index.js",
+            "commands": "npm install",
             "ignore": [
                 "node_modules",
-                ".npm",
-                "src"
+                ".npm"
             ],
-            "path": "functions/ai"
+            "path": "functions/ai",
+            "scopes": ["users.read"],
+            "specification": "s-0.5vcpu-512mb"
         }
     ]
 }

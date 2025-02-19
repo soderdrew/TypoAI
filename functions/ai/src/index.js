@@ -1,13 +1,14 @@
 import { OpenAI } from 'openai';
-import { Client, Databases } from 'node-appwrite';
+import { Client } from 'node-appwrite';
 
-interface RequestData {
-  type: 'format' | 'grammar';
-  content: string;
-}
+export default async function(context) {
+  const { req, res, log, error } = context;
+  const envEndpoint = process.env.APPWRITE_FUNCTION_ENDPOINT;
+  const envProjectId = process.env.APPWRITE_FUNCTION_PROJECT_ID;
+  const envApiKey = process.env.APPWRITE_API_KEY;
+  const envOpenAiKey = process.env.OPENAI_API_KEY;
 
-export default async ({ req, res, log, error }) => {
-  if (!process.env.APPWRITE_FUNCTION_ENDPOINT || !process.env.APPWRITE_FUNCTION_PROJECT_ID || !process.env.APPWRITE_API_KEY || !process.env.OPENAI_API_KEY) {
+  if (!envEndpoint || !envProjectId || !envApiKey || !envOpenAiKey) {
     return res.json({
       error: 'Missing required environment variables',
       content: null,
@@ -17,17 +18,17 @@ export default async ({ req, res, log, error }) => {
 
   // Initialize Appwrite client
   const client = new Client()
-    .setEndpoint(process.env.APPWRITE_FUNCTION_ENDPOINT)
-    .setProject(process.env.APPWRITE_FUNCTION_PROJECT_ID)
-    .setKey(process.env.APPWRITE_API_KEY);
+    .setEndpoint(envEndpoint)
+    .setProject(envProjectId)
+    .setKey(envApiKey);
 
   // Initialize OpenAI client
   const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
+    apiKey: envOpenAiKey
   });
 
   try {
-    const data = JSON.parse(req.body) as RequestData;
+    const data = JSON.parse(req.body);
     
     if (data.type === 'format') {
       const response = await openai.chat.completions.create({
@@ -90,4 +91,4 @@ export default async ({ req, res, log, error }) => {
       suggestions: []
     });
   }
-}; 
+} 
