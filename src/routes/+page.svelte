@@ -655,14 +655,23 @@
 					userName: $auth.user.name || 'Anonymous',
 					initialContent: file.content,
 					onContentChange: (newContent) => {
-						// Only update content if it's different to prevent loops
-						if (newContent !== content) {
-							content = newContent;
-							hasUnsavedChanges = true;
+						try {
+							// Check if this is a special message
+							const message = JSON.parse(newContent);
+							if (message.type === 'collaborator_removed') {
+								if (message.removedId === $auth.user?.$id) {
+									// If we're the removed collaborator, reload the page
+									window.location.reload();
+									return;
+								}
+							}
+						} catch {
+							// Not a JSON message, handle as normal content update
+							if (newContent !== content) {
+								content = newContent;
+								hasUnsavedChanges = true;
+							}
 						}
-					},
-					onPresenceChange: () => {
-						// No-op - presence functionality disabled
 					}
 				});
 				
@@ -753,8 +762,13 @@
 
 	/** Current file being edited */
 	let currentFile: AppwriteDocument | null = null;
-	let isSidebarOpen = false;
+	let isSidebarOpen = localStorage.getItem('sidebarOpen') !== 'false'; // Default to true
 	let autoSaveTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	// Watch sidebar state changes and save to localStorage
+	$: {
+		localStorage.setItem('sidebarOpen', isSidebarOpen.toString());
+	}
 
 	// Modify the auto-save reactive statement
 	$: if (content && currentFile && currentCollaboration) {
@@ -817,6 +831,9 @@
 	let isShareModalOpen = false;
 
 	let collaboratorProfiles: CollaboratorProfile[] = [];
+	let isAddingCollaborator = false;
+	let addCollaboratorSuccess: string | null = null;
+	let removeCollaboratorSuccess: string | null = null;
 
 	const loadCollaboratorProfiles = async () => {
 		if (!currentFile) return;
@@ -838,6 +855,10 @@
 		// Load collaborator profiles before opening modal
 		await loadCollaboratorProfiles();
 		isShareModalOpen = true;
+		// Blur the textarea when opening modal
+		if (textArea) {
+			textArea.blur();
+		}
 	};
 
 	let newCollaboratorEmail = '';
@@ -847,7 +868,9 @@
 		if (!currentFile || !$auth.user) return;
 		
 		try {
+			isAddingCollaborator = true;
 			addCollaboratorError = null;
+			addCollaboratorSuccess = null;
 			
 			// Use the databaseService to find the user by email
 			const userProfile = await databaseService.findUserByEmail(newCollaboratorEmail);
@@ -862,12 +885,24 @@
 			// Immediately refresh collaborator profiles
 			await loadCollaboratorProfiles();
 			
-			// Clear the input
+			// Update the current file to reflect the changes
+			const updatedFile = await databaseService.getDocument(currentFile.$id) as AppwriteDocument;
+			currentFile = updatedFile;
+			
+			// Clear the input and show success message
 			newCollaboratorEmail = '';
+			addCollaboratorSuccess = 'Collaborator added successfully';
+			
+			// Clear success message after 3 seconds
+			setTimeout(() => {
+				addCollaboratorSuccess = null;
+			}, 3000);
 			
 		} catch (error) {
 			console.error('Error adding collaborator:', error);
 			addCollaboratorError = 'Failed to add collaborator. Make sure the email is correct and the user exists.';
+		} finally {
+			isAddingCollaborator = false;
 		}
 	}
 
@@ -877,9 +912,39 @@
 		if (!confirm('Are you sure you want to remove this collaborator?')) return;
 		
 		try {
+			// Remove the collaborator
 			await databaseService.removeCollaborator(currentFile.$id, collaboratorId);
-			// Refresh collaborator profiles
+			
+			// Show success message
+			removeCollaboratorSuccess = 'Collaborator removed successfully';
+			
+			// Immediately refresh collaborator profiles for the owner's modal
 			await loadCollaboratorProfiles();
+			
+			// Update the current file to reflect the changes
+			const updatedFile = await databaseService.getDocument(currentFile.$id) as AppwriteDocument;
+			currentFile = updatedFile;
+			
+			// Clear success message after 3 seconds
+			setTimeout(() => {
+				removeCollaboratorSuccess = null;
+			}, 3000);
+			
+			// If we have an active collaboration, send a special message to notify removed user
+			if (currentCollaboration) {
+				// Save any pending changes first
+				if (content !== currentCollaboration.getContent()) {
+					await currentCollaboration.saveContent(content);
+				}
+				
+				// Force reload for the removed collaborator
+				const message = {
+					type: 'collaborator_removed',
+					removedId: collaboratorId
+				};
+				
+				await currentCollaboration.saveContent(JSON.stringify(message));
+			}
 		} catch (error) {
 			console.error('Error removing collaborator:', error);
 			errorMessage = 'Failed to remove collaborator';
@@ -1524,8 +1589,16 @@
 
 	<!-- Add this before the closing body tag -->
 	{#if isShareModalOpen && currentFile}
-		<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-			<div class="bg-gray-800 rounded-lg max-w-2xl w-full">
+		<div 
+			class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+			on:mousedown|stopPropagation
+			on:keydown|stopPropagation
+		>
+			<div 
+				class="bg-gray-800 rounded-lg max-w-2xl w-full"
+				on:mousedown|stopPropagation
+				on:keydown|stopPropagation
+			>
 				<div class="flex justify-between items-center p-4 border-b border-gray-700">
 					<h2 class="text-lg font-semibold text-gray-100">Share Document</h2>
 					<button 
@@ -1547,17 +1620,29 @@
 								placeholder="Enter email address"
 								bind:value={newCollaboratorEmail}
 								class="flex-1 bg-gray-700 text-gray-100 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+								on:keydown|stopPropagation
+								on:keyup|stopPropagation
+								on:keypress|stopPropagation
 							/>
 							<button
 								class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
 								on:click={handleAddCollaborator}
-								disabled={!newCollaboratorEmail}
+								disabled={!newCollaboratorEmail || isAddingCollaborator}
 							>
+								{#if isAddingCollaborator}
+									<svg class="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+									</svg>
+								{/if}
 								Add
 							</button>
 						</div>
 						{#if addCollaboratorError}
 							<p class="mt-2 text-sm text-red-400">{addCollaboratorError}</p>
+						{/if}
+						{#if addCollaboratorSuccess}
+							<p class="mt-2 text-sm text-green-400 transition-opacity duration-300">{addCollaboratorSuccess}</p>
 						{/if}
 					</div>
 
@@ -1636,6 +1721,13 @@
 					</div>
 				</div>
 			</div>
+		</div>
+	{/if}
+
+	<!-- Add success message for remove action -->
+	{#if removeCollaboratorSuccess}
+		<div class="fixed bottom-4 right-4 bg-green-900 text-green-100 px-4 py-2 rounded-lg shadow-lg transition-opacity duration-300">
+			{removeCollaboratorSuccess}
 		</div>
 	{/if}
 {/if}

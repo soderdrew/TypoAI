@@ -185,17 +185,11 @@ export const databaseService = {
 
     async getDocument(documentId: string): Promise<SharedDocument> {
         try {
+            // Get document without explicit permissions - they are handled by collection rules
             const doc = await databases.getDocument(
                 DATABASE_ID,
                 DOCUMENTS_COLLECTION_ID,
-                documentId,
-                // Add permissions for both owner and collaborators
-                [
-                    Permission.read(Role.user('{{document.ownerId}}')),
-                    Permission.read(Role.user('{{document.collaborators}}')),
-                    Permission.update(Role.user('{{document.ownerId}}')),
-                    Permission.update(Role.user('{{document.collaborators}}'))
-                ]
+                documentId
             );
             return doc as unknown as SharedDocument;
         } catch (error) {
@@ -273,22 +267,24 @@ export const databaseService = {
 
     async removeCollaborator(documentId: string, collaboratorId: string): Promise<SharedDocument> {
         try {
+            // First get the current document
             const doc = await this.getDocument(documentId);
-            const index = doc.collaborators.indexOf(collaboratorId);
-            if (index > -1) {
-                doc.collaborators.splice(index, 1);
-                
-                // Update document and remove collaborator permissions
-                const updatedDoc = await databases.updateDocument(
-                    DATABASE_ID,
-                    DOCUMENTS_COLLECTION_ID,
-                    documentId,
-                    { collaborators: doc.collaborators }
-                );
-                
-                return updatedDoc as unknown as SharedDocument;
-            }
-            return doc;
+            
+            // Remove the collaborator from the array
+            const updatedCollaborators = doc.collaborators.filter(id => id !== collaboratorId);
+            
+            // Update the document with the new collaborators array
+            const updatedDoc = await databases.updateDocument(
+                DATABASE_ID,
+                DOCUMENTS_COLLECTION_ID,
+                documentId,
+                { 
+                    collaborators: updatedCollaborators,
+                    updatedAt: new Date().toISOString()
+                }
+            );
+            
+            return updatedDoc as unknown as SharedDocument;
         } catch (error) {
             console.error('Error removing collaborator:', error);
             throw error;

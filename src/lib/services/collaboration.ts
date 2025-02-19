@@ -15,21 +15,8 @@ const client = new Client()
 
 const databases = new Databases(client);
 
-interface CursorPosition {
-    start: number;
-    end: number;
-}
-
-interface UserPresence {
-    userId: string;
-    name: string;
-    cursor: CursorPosition | null;
-    lastActive: string;
-}
-
 interface DocumentState {
     content: string;
-    presence: Record<string, UserPresence>;
 }
 
 interface CollaborationOptions {
@@ -38,20 +25,17 @@ interface CollaborationOptions {
     userName: string;
     initialContent: string;
     onContentChange: (content: string) => void;
-    onPresenceChange: (presence: Record<string, UserPresence>) => void;
 }
 
 interface DocumentResponse extends Models.Document {
     content: string;
-    presence?: Record<string, UserPresence>;
 }
 
 let databaseUpdateTimeout: ReturnType<typeof setTimeout> | null = null;
-let presenceUpdateTimeout: ReturnType<typeof setTimeout> | null = null;
 const activeSubscriptions = new Map<string, () => void>();
 
 export const initializeCollaboration = async (options: CollaborationOptions) => {
-    const { documentId, userId, userName, initialContent, onContentChange, onPresenceChange } = options;
+    const { documentId, userId, userName, initialContent, onContentChange } = options;
     console.log("Initializing collaboration for document:", documentId);
 
     // Clean up any existing subscription for this document
@@ -64,8 +48,7 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
 
     // Get the latest document state from the database
     let latestState: DocumentState = {
-        content: initialContent,
-        presence: {}
+        content: initialContent
     };
 
     // Store document metadata
@@ -82,102 +65,37 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
 
         if (doc.content) {
             latestState.content = doc.content;
-            // Only use presence if it exists in the document
-            if (doc.$attributes && doc.$attributes.includes('presence')) {
-                latestState.presence = doc.presence || {};
-            }
             console.log("Loaded latest state from database:", latestState);
             onContentChange(latestState.content);
-            onPresenceChange(latestState.presence);
         }
     } catch (error) {
         console.error("Failed to load latest state from database:", error);
     }
 
-    // Initialize our presence
-    latestState.presence[userId] = {
-        userId,
-        name: userName,
-        cursor: null,
-        lastActive: new Date().toISOString()
-    };
-
-    // Subscribe to document changes
-    const unsubscribe = client.subscribe(`databases.${DATABASE_ID}.collections.${COLLECTION_ID}.documents.${documentId}`, 
-        (response: RealtimeResponseEvent<any>) => {
-            if (response.events.includes('databases.*.collections.*.documents.*.update')) {
-                const updatedState = response.payload as DocumentState;
-                console.log("Received realtime update:", updatedState);
-
-                // Update content if changed
-                if (updatedState.content !== latestState.content) {
-                    latestState.content = updatedState.content;
-                    onContentChange(updatedState.content);
-                }
-
-                // Update presence information if it exists
-                if (updatedState.presence && documentMetadata?.$attributes?.includes('presence')) {
-                    latestState.presence = updatedState.presence;
-                    onPresenceChange(updatedState.presence);
-                }
-            }
-        }
-    );
-
-    // Store cleanup function
-    const cleanup = () => {
-        console.log("Cleaning up collaboration for document:", documentId);
-        if (databaseUpdateTimeout) {
-            clearTimeout(databaseUpdateTimeout);
-        }
-        if (presenceUpdateTimeout) {
-            clearTimeout(presenceUpdateTimeout);
-        }
-        // Remove our presence before unsubscribing
-        updatePresence(null);
-        unsubscribe();
-    };
-    activeSubscriptions.set(documentId, cleanup);
-
-    // Function to update presence
-    const updatePresence = async (cursor: CursorPosition | null) => {
-        // Only update presence if the attribute exists in the document
-        if (!documentMetadata?.$attributes?.includes('presence')) {
-            console.log("Presence attribute not available yet");
-            return;
-        }
-
-        // Update our presence locally first
-        latestState.presence[userId] = {
-            userId,
-            name: userName,
-            cursor,
-            lastActive: new Date().toISOString()
-        };
-
-        // Debounce presence updates
-        if (presenceUpdateTimeout) {
-            clearTimeout(presenceUpdateTimeout);
-        }
-        presenceUpdateTimeout = setTimeout(async () => {
-            try {
+    // Function to save content changes
+    const saveContent = async (newContent: string) => {
+        // Check if this is a special message
+        try {
+            const message = JSON.parse(newContent);
+            if (message.type === 'collaborator_removed') {
+                // For special messages, just send them through the realtime system
+                // without saving to the database
                 await databases.updateDocument(
                     DATABASE_ID,
                     COLLECTION_ID,
                     documentId,
-                    {
-                        presence: latestState.presence
+                    { 
+                        // Send the message but keep the existing content
+                        content: latestState.content,
+                        _message: message 
                     }
                 );
-                console.log("Successfully updated presence");
-            } catch (error) {
-                console.error("Failed to update presence:", error);
+                return;
             }
-        }, 100); // Shorter debounce for presence updates
-    };
+        } catch {
+            // Not a JSON message, handle as normal content update
+        }
 
-    // Function to save content changes
-    const saveContent = async (newContent: string) => {
         if (newContent === latestState.content) {
             return; // No changes to save
         }
@@ -189,20 +107,11 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
             }
             databaseUpdateTimeout = setTimeout(async () => {
                 try {
-                    const updateData: any = {
-                        content: newContent
-                    };
-                    
-                    // Only include presence if the attribute exists
-                    if (documentMetadata?.$attributes?.includes('presence')) {
-                        updateData.presence = latestState.presence;
-                    }
-
                     await databases.updateDocument(
                         DATABASE_ID,
                         COLLECTION_ID,
                         documentId,
-                        updateData
+                        { content: newContent }
                     );
                     latestState.content = newContent;
                     console.log("Successfully saved update to database");
@@ -215,12 +124,49 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
         }
     };
 
+    // Subscribe to document changes
+    const unsubscribe = client.subscribe(`databases.${DATABASE_ID}.collections.${COLLECTION_ID}.documents.${documentId}`, 
+        (response: RealtimeResponseEvent<any>) => {
+            if (response.events.includes('databases.*.collections.*.documents.*.update')) {
+                const updatedState = response.payload;
+                console.log("Received realtime update:", updatedState);
+
+                // Check for special messages
+                if (updatedState._message) {
+                    const message = updatedState._message;
+                    if (message.type === 'collaborator_removed') {
+                        if (message.removedId === userId) {
+                            // If we're the removed collaborator, reload the page
+                            window.location.reload();
+                            return;
+                        }
+                    }
+                    return; // Don't update content for special messages
+                }
+
+                // Update content if changed
+                if (updatedState.content !== latestState.content) {
+                    latestState.content = updatedState.content;
+                    onContentChange(updatedState.content);
+                }
+            }
+        }
+    );
+
+    // Store cleanup function
+    const cleanup = () => {
+        console.log("Cleaning up collaboration for document:", documentId);
+        if (databaseUpdateTimeout) {
+            clearTimeout(databaseUpdateTimeout);
+        }
+        unsubscribe();
+    };
+    activeSubscriptions.set(documentId, cleanup);
+
     // Return the interface for the collaboration
     return {
         saveContent,
-        updatePresence,
         cleanup,
-        getContent: () => latestState.content,
-        getPresence: () => latestState.presence
+        getContent: () => latestState.content
     };
 };
