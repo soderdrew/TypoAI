@@ -1,6 +1,7 @@
 // src/lib/services/collaboration.ts
 import { Databases, Client } from 'appwrite';
 import type { RealtimeResponseEvent, Models } from 'appwrite';
+import type { AISuggestion } from './ai';
 
 const APPWRITE_ENDPOINT = import.meta.env.VITE_APPWRITE_ENDPOINT;
 const APPWRITE_PROJECT_ID = import.meta.env.VITE_APPWRITE_PROJECT_ID;
@@ -15,6 +16,7 @@ const databases = new Databases(client);
 
 interface DocumentState {
     content: string;
+    aiSuggestions?: AISuggestion[];
 }
 
 interface CollaborationOptions {
@@ -23,17 +25,19 @@ interface CollaborationOptions {
     userName: string;
     initialContent: string;
     onContentChange: (content: string) => void;
+    onAISuggestionsChange?: (suggestions: AISuggestion[] | null) => void;
 }
 
 interface DocumentResponse extends Models.Document {
     content: string;
+    aiSuggestions?: AISuggestion[];
 }
 
 let databaseUpdateTimeout: ReturnType<typeof setTimeout> | null = null;
 const activeSubscriptions = new Map<string, () => void>();
 
 export const initializeCollaboration = async (options: CollaborationOptions) => {
-    const { documentId, userId, initialContent, onContentChange } = options;
+    const { documentId, userId, initialContent, onContentChange, onAISuggestionsChange } = options;
     console.log("Initializing collaboration for document:", documentId);
 
     // Clean up any existing subscription for this document
@@ -63,6 +67,10 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
 
         if (doc.content) {
             latestState.content = doc.content;
+            if (doc.aiSuggestions) {
+                latestState.aiSuggestions = doc.aiSuggestions;
+                onAISuggestionsChange?.(doc.aiSuggestions);
+            }
             console.log("Loaded latest state from database:", latestState);
             onContentChange(latestState.content);
         }
@@ -71,7 +79,7 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
     }
 
     // Function to save content changes
-    const saveContent = async (newContent: string) => {
+    const saveContent = async (newContent: string, newSuggestions?: AISuggestion[]) => {
         // Check if this is a special message
         try {
             const message = JSON.parse(newContent);
@@ -94,7 +102,7 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
             // Not a JSON message, handle as normal content update
         }
 
-        if (newContent === latestState.content) {
+        if (newContent === latestState.content && !newSuggestions) {
             return; // No changes to save
         }
 
@@ -105,13 +113,21 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
             }
             databaseUpdateTimeout = setTimeout(async () => {
                 try {
+                    const updateData: any = { content: newContent };
+                    if (newSuggestions) {
+                        updateData.aiSuggestions = newSuggestions;
+                    }
+                    
                     await databases.updateDocument(
                         DATABASE_ID,
                         COLLECTION_ID,
                         documentId,
-                        { content: newContent }
+                        updateData
                     );
                     latestState.content = newContent;
+                    if (newSuggestions) {
+                        latestState.aiSuggestions = newSuggestions;
+                    }
                     console.log("Successfully saved update to database");
                 } catch (error) {
                     console.error("Failed to save update to database:", error);
@@ -147,6 +163,12 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
                     latestState.content = updatedState.content;
                     onContentChange(updatedState.content);
                 }
+
+                // Update AI suggestions if changed
+                if (updatedState.aiSuggestions !== latestState.aiSuggestions) {
+                    latestState.aiSuggestions = updatedState.aiSuggestions;
+                    onAISuggestionsChange?.(updatedState.aiSuggestions);
+                }
             }
         }
     );
@@ -165,6 +187,7 @@ export const initializeCollaboration = async (options: CollaborationOptions) => 
     return {
         saveContent,
         cleanup,
-        getContent: () => latestState.content
+        getContent: () => latestState.content,
+        getAISuggestions: () => latestState.aiSuggestions
     };
 };
