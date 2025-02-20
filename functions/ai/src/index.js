@@ -32,7 +32,7 @@ export default async function(context) {
     
     if (data.type === 'format') {
       const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
@@ -56,7 +56,7 @@ export default async function(context) {
     } 
     else if (data.type === 'grammar') {
       const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",

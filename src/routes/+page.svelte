@@ -27,6 +27,8 @@
 	import Header from '$lib/components/Header.svelte';
 
 	import { AIService } from '$lib/services/ai';
+	import FormatPreviewModal from '$lib/components/FormatPreviewModal.svelte';
+	import type { FormatPreview } from '$lib/services/ai';
 
 	inject({ mode: dev ? "development" : "production" });
 
@@ -356,19 +358,37 @@
 
 	const aiService = new AIService();
 
+	let formatPreview: FormatPreview | null = null;
+	let isFormatPreviewOpen = false;
+
 	const aiFormat = async () => {
 		console.log("AI Format clicked");
 		try {
-			const result = await aiService.formatMarkdown(content);
+			const result = await aiService.previewFormat(content);
 			if (result.error) {
 				errorMessage = result.error;
 				return;
 			}
-			content = result.content;
-			hasUnsavedChanges = true;
+			if (result.preview) {
+				formatPreview = result.preview;
+				isFormatPreviewOpen = true;
+			}
 		} catch (error) {
 			errorMessage = `AI formatting failed: ${error}`;
 		}
+	};
+
+	const handleAcceptFormat = async () => {
+		if (!formatPreview) return;
+		content = formatPreview.formatted;
+		hasUnsavedChanges = true;
+		isFormatPreviewOpen = false;
+		formatPreview = null;
+	};
+
+	const handleRejectFormat = () => {
+		isFormatPreviewOpen = false;
+		formatPreview = null;
 	};
 
 	const grammarCheck = async () => {
@@ -477,6 +497,13 @@
 		isOpen={isShareModalOpen} 
 		{currentFile}
 		onClose={() => isShareModalOpen = false}
+	/>
+
+	<FormatPreviewModal
+		isOpen={isFormatPreviewOpen}
+		preview={formatPreview}
+		onAccept={handleAcceptFormat}
+		onReject={handleRejectFormat}
 	/>
 
 	<div class="flex flex-col h-screen {isSidebarOpen ? 'pl-64' : ''} transition-all duration-200 bg-gray-950 text-gray-50">
