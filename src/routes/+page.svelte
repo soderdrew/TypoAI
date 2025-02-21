@@ -8,7 +8,6 @@
 	import gettingStarted from "$lib/gettingStarted.md?raw";
 	import { codeEval } from "$lib/utilities/codeEval";
 	import { formatMd } from "$lib/utilities/formatMd";
-	import type { FileSystemFileHandle } from '$lib/types/fileSystem';
 	import { FileOperationsService } from '$lib/services/fileOperations';
 
 	import { auth } from '$lib/stores/auth';
@@ -29,13 +28,14 @@
 	import { AIService } from '$lib/services/ai';
 	import FormatPreviewModal from '$lib/components/FormatPreviewModal.svelte';
 	import type { FormatPreview } from '$lib/services/ai';
+	import GrammarPreviewModal from '$lib/components/GrammarPreviewModal.svelte';
+	import type { AISuggestion } from '$lib/services/ai';
 
 	inject({ mode: dev ? "development" : "production" });
 
 	let content = "";
 	let viewMode = false;
 	let currentSlide: number;
-	let fileHandle: FileSystemFileHandle | null = null;
 	let errorMessage: string | null = null;
 	let supported = false;
 	if (browser) supported = Boolean(window.showOpenFilePicker);
@@ -65,19 +65,16 @@
 	const open = async () => {
 		const result = await fileOps.open();
 		content = result.content;
-		fileHandle = fileOps.getFileHandle();
 		errorMessage = result.error;
 	};
 
 	const saveAs = async () => {
 		const result = await fileOps.saveAs(content);
-		fileHandle = fileOps.getFileHandle();
 		errorMessage = result.error;
 	};
 
 	const save = async () => {
 		const result = await fileOps.save(content, viewMode);
-		fileHandle = fileOps.getFileHandle();
 		errorMessage = result.error;
 	};
 
@@ -85,7 +82,6 @@
 		const result = await fileOps.handleDrop(e);
 		if (result.content) {
 			content = result.content;
-			fileHandle = fileOps.getFileHandle();
 		}
 		errorMessage = result.error;
 	};
@@ -391,9 +387,38 @@
 		formatPreview = null;
 	};
 
+	let grammarPreview: { original: string; corrected: string; changes: AISuggestion[] } | null = null;
+	let isGrammarModalOpen = false;
+
 	const grammarCheck = async () => {
-		// TODO: Implement grammar checking
-		console.log("Grammar check clicked");
+		try {
+			const result = await aiService.analyzeText(content);
+			if (result.error) {
+				errorMessage = result.error;
+			return;
+		}
+			grammarPreview = result;
+			isGrammarModalOpen = true;
+		} catch (error) {
+			errorMessage = `Grammar check failed: ${error}`;
+		}
+	};
+
+	const handleAcceptGrammar = (activeChanges: AISuggestion[]) => {
+		if (!grammarPreview) return;
+		
+		content = activeChanges.length === 0 ? grammarPreview.original : activeChanges.reduce((text, change) => {
+			return text.replace(change.original, change.suggestion);
+		}, grammarPreview.original);
+		
+		hasUnsavedChanges = true;
+		isGrammarModalOpen = false;
+		grammarPreview = null;
+	};
+
+	const handleRejectGrammar = () => {
+		isGrammarModalOpen = false;
+		grammarPreview = null;
 	};
 
 	onMount(() => {
@@ -504,6 +529,15 @@
 		preview={formatPreview}
 		onAccept={handleAcceptFormat}
 		onReject={handleRejectFormat}
+	/>
+
+	<GrammarPreviewModal
+		isOpen={isGrammarModalOpen}
+		original={grammarPreview?.original ?? ""}
+		corrected={grammarPreview?.corrected ?? ""}
+		changes={grammarPreview?.changes ?? []}
+		onAccept={handleAcceptGrammar}
+		onReject={handleRejectGrammar}
 	/>
 
 	<div class="flex flex-col h-screen {isSidebarOpen ? 'pl-64' : ''} transition-all duration-200 bg-gray-950 text-gray-50">

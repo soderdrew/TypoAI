@@ -83,32 +83,63 @@ app.post('/api/grammar', async (req, res) => {
             messages: [
                 {
                     role: "system",
-                    content: "Analyze the following text and provide suggestions for improvements in spelling, grammar, style, and clarity. For each suggestion, include the start and end indices of the text to be replaced."
+                    content: "You are a grammar and style checker. Analyze the text and provide two things in your response: 1) A corrected version of the entire text, and 2) An array of changes made in JSON format. For each change include: type (spelling/grammar/style/clarity), the text that was changed, and an explanation. Format your response as JSON like this: {\"corrected\": \"full corrected text here\", \"changes\": [{\"type\": \"spelling\", \"original\": \"teh\", \"suggestion\": \"the\", \"explanation\": \"Corrected spelling error\"}]}"
                 },
                 {
                     role: "user",
-                    content
+                    content: `Please analyze and correct this text: ${content}`
                 }
             ],
             temperature: 0.7,
-            max_tokens: 1000
+            max_tokens: 1500
         });
 
-        const suggestions = JSON.parse(response.choices[0].message.content);
+        const aiResponse = response.choices[0].message.content;
+        let result;
+        
+        try {
+            // Try to parse the response as JSON
+            result = JSON.parse(aiResponse);
+        } catch (parseError) {
+            console.log('Failed to parse AI response as JSON, attempting to extract JSON');
+            // If parsing fails, try to find JSON object in the response
+            const jsonMatch = aiResponse.match(/\{.*\}/s);
+            if (jsonMatch) {
+                result = JSON.parse(jsonMatch[0]);
+            } else {
+                throw new Error('Could not extract valid JSON from AI response');
+            }
+        }
+
+        // Validate the response format
+        if (!result.corrected || !Array.isArray(result.changes)) {
+            throw new Error('Invalid response format from AI');
+        }
+
+        // Validate each change has required fields
+        result.changes = result.changes.filter(change => 
+            change.type && 
+            change.original && 
+            change.suggestion && 
+            change.explanation
+        );
+
         console.log('✨ Grammar check completed:', {
-            suggestionCount: suggestions.length,
-            suggestions: suggestions.slice(0, 2) // Log first two suggestions as preview
+            changeCount: result.changes.length,
+            changes: result.changes.slice(0, 2) // Log first two changes as preview
         });
 
         res.json({
-            suggestions,
+            original: content,
+            corrected: result.corrected,
+            changes: result.changes,
             error: null
         });
     } catch (err) {
         console.error('❌ Error analyzing text:', err);
         res.status(500).json({
             error: `Error analyzing text: ${err.message}`,
-            suggestions: []
+            changes: []
         });
     }
 });

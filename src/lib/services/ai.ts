@@ -7,12 +7,17 @@ const client = new Client()
 const functions = new Functions(client);
 
 export interface AISuggestion {
+    type: 'spelling' | 'grammar' | 'style' | 'clarity';
     original: string;
     suggestion: string;
-    type: 'spelling' | 'grammar' | 'style' | 'clarity';
     explanation: string;
-    startIndex: number;
-    endIndex: number;
+}
+
+export interface GrammarCheckResult {
+    original: string;
+    corrected: string;
+    changes: AISuggestion[];
+    error: string | null;
 }
 
 export interface FormatPreview {
@@ -76,7 +81,7 @@ export class AIService {
         }
     }
 
-    async analyzeText(content: string): Promise<{ suggestions: AISuggestion[]; error: string | null }> {
+    async analyzeText(content: string): Promise<GrammarCheckResult> {
         try {
             const response = await fetch(`${API_URL}/api/grammar`, {
                 method: 'POST',
@@ -91,13 +96,26 @@ export class AIService {
             }
 
             const result = await response.json();
+            if (result.error) {
+                return { 
+                    original: content,
+                    corrected: content,
+                    changes: [],
+                    error: result.error 
+                };
+            }
+
             return {
-                suggestions: result.suggestions || [],
-                error: result.error
+                original: result.original,
+                corrected: result.corrected,
+                changes: result.changes,
+                error: null
             };
         } catch (error) {
             return {
-                suggestions: [],
+                original: content,
+                corrected: content,
+                changes: [],
                 error: `Error analyzing text: ${error}`
             };
         }
